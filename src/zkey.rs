@@ -1,7 +1,7 @@
 use crate::{
+    C1, C2, F, ProjectiveG1, ProjectiveG2,
     conversions::from_affine_mont,
     file_wrapper::{FileWrapper, Section},
-    ProjectiveG1, ProjectiveG2, C1, C2, F,
 };
 use icicle_core::traits::FieldImpl;
 use std::io::{self};

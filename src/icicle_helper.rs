@@ -1,8 +1,8 @@
 use crate::F;
 use icicle_core::{
     curve::{Affine, Curve, Projective},
-    msm::{msm, MSMConfig, MSM},
-    ntt::{ntt_inplace, NTTConfig, NTTDir, NTT},
+    msm::{MSM, MSMConfig, msm},
+    ntt::{NTT, NTTConfig, NTTDir, ntt_inplace},
     traits::FieldImpl,
 };
 use icicle_runtime::{

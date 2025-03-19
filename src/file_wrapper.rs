@@ -1,14 +1,14 @@
-use icicle_core::curve::Affine;
-use icicle_core::traits::FieldImpl;
+use icicle_core::{curve::Affine, traits::FieldImpl};
 use memmap::{Mmap, MmapOptions};
 use serde::Serialize;
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Read, Seek, SeekFrom};
-use std::mem;
-use std::path::Path;
+use std::{
+    fs::{File, OpenOptions},
+    io::{self, BufWriter, Read, Seek, SeekFrom},
+    mem,
+    path::Path,
+};
 
-use crate::zkey::ZKey;
-use crate::{F, G1, G2};
+use crate::{F, G1, G2, zkey::ZKey};
 
 const GROTH16_PROTOCOL_ID: u32 = 1;
 

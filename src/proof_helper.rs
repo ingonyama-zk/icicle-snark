@@ -1,14 +1,14 @@
 use crate::{
+    F, ProjectiveG1, ProjectiveG2,
     cache::ZKeyCache,
     conversions::{from_u8, serialize_g1_affine, serialize_g2_affine},
     file_wrapper::FileWrapper,
     icicle_helper::{msm_helper, ntt_helper},
-    ProjectiveG1, ProjectiveG2, F,
 };
 use icicle_bn254::curve::ScalarField;
 use icicle_core::{
     traits::{FieldImpl, MontgomeryConvertible},
-    vec_ops::{mul_scalars, sub_scalars, VecOpsConfig},
+    vec_ops::{VecOpsConfig, mul_scalars, sub_scalars},
 };
 use icicle_runtime::{
     memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice},

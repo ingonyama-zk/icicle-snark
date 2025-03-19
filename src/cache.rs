@@ -1,20 +1,24 @@
 use icicle_bn254::curve::ScalarField;
-use icicle_core::ntt::{get_root_of_unity, initialize_domain, release_domain, NTTInitDomainConfig};
-use icicle_core::traits::{FieldImpl, MontgomeryConvertible};
-use icicle_runtime::memory::{DeviceVec, HostOrDeviceSlice, HostSlice};
-use icicle_runtime::stream::IcicleStream;
+use icicle_core::{
+    ntt::{NTTInitDomainConfig, get_root_of_unity, initialize_domain, release_domain},
+    traits::{FieldImpl, MontgomeryConvertible},
+};
+use icicle_runtime::{
+    memory::{DeviceVec, HostOrDeviceSlice, HostSlice},
+    stream::IcicleStream,
+};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, Read, Write};
-use std::path::Path;
-use std::sync::Arc;
-use std::{mem, slice};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, Read, Write},
+    mem,
+    path::Path,
+    slice,
+    sync::Arc,
+};
 
-use crate::conversions::from_u8;
-use crate::file_wrapper::FileWrapper;
-use crate::zkey::ZKey;
-use crate::{F, G1, G2};
+use crate::{F, G1, G2, conversions::from_u8, file_wrapper::FileWrapper, zkey::ZKey};
 
 const W: [&str; 30] = [
     "0x0000000000000000000000000000000000000000000000000000000000000001",

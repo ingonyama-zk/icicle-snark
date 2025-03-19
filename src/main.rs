@@ -1,4 +1,4 @@
-use icicle_snark::{groth16_prove, CacheManager};
+use icicle_snark::{CacheManager, groth16_prove};
 use std::io::{self, BufRead, Write};
 
 enum ProofSystem {
