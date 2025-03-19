@@ -26,7 +26,6 @@ pub type ProjectiveG2 = Projective<C2>;
 /// Possible device names:
 /// - `CPU`
 /// - `CUDA`
-/// - `METAL`
 fn try_load_and_set_backend_device(device_type: &str) -> Result<(), eIcicleError> {
     if device_type != "CPU" {
         icicle_runtime::runtime::load_backend_from_env_or_default()?;
@@ -48,6 +47,7 @@ pub fn groth16_prove(
     }
 
     // load from cache w.r.t zkey and device
+    let cache_key = format!("{}_{}", zkey_path.as_ref().display(), device);
     let cache_key = format!("{}_{}", zkey_path.as_ref().display(), device);
     if !cache_manager.contains(&cache_key) {
         let computed_cache = cache_manager.compute(zkey_path)?;
