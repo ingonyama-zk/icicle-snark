@@ -11,6 +11,7 @@ use icicle_bn254::curve::{CurveCfg, G2CurveCfg, ScalarField};
 use icicle_core::curve::{Affine, Projective};
 use icicle_runtime::eIcicleError;
 use proof_helper::groth16_prove_helper;
+use std::time::Instant;
 use std::path::Path;
 
 pub type F = ScalarField;
@@ -37,14 +38,15 @@ fn try_load_and_set_backend_device(device_type: &str) -> Result<(), eIcicleError
 pub fn groth16_prove(
     witness_path: impl AsRef<Path>,
     zkey_path: impl AsRef<Path>,
-    proof: impl AsRef<Path>,
-    public: impl AsRef<Path>,
+    proof_path: impl AsRef<Path>,
+    public_path: impl AsRef<Path>,
     device: &str,
     cache_manager: &mut CacheManager,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if let Err(e) = try_load_and_set_backend_device(device) {
-        eprintln!("could not load and set backend device: {:?}", e);
-    }
+    let start = Instant::now();
+    try_load_and_set_backend_device(device);
+
+    let cache_key = format!("{:?}_{}", zkey_path.as_ref(), device);
 
     // load from cache w.r.t zkey and device
     let cache_key = format!("{}_{}", zkey_path.as_ref().display(), device);
@@ -55,10 +57,10 @@ pub fn groth16_prove(
     }
     let zkey_cache = cache_manager.get_cache(&cache_key);
 
-    // save to file (TODO: can be returned instead to be saved elsewhere)
     let (proof_data, public_signals) = groth16_prove_helper(witness_path, zkey_cache)?;
-    FileWrapper::save_json_file(proof, &proof_data)?;
-    FileWrapper::save_json_file(public, &public_signals)?;
+
+    FileWrapper::save_json_file(proof_path, &proof_data)?;
+    FileWrapper::save_json_file(public_path, &public_signals)?;
 
     Ok(())
 }
