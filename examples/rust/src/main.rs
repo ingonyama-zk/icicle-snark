@@ -1,6 +1,5 @@
-use icicle_snark::{groth16_prove, CacheManager};
-use std::env;
-use std::path::{Path, PathBuf};
+use icicle_snark::{CacheManager, groth16_prove};
+use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 

@@ -49,7 +49,7 @@ prove --witness ./witness.wtns --zkey ./circuit.zkey --proof ./proof.json --publ
 
 You can integrate Icicle Snark into your Rust project using the provided `icicle_snark` library.
 
-#### First add it as dependency
+### First add it as dependency
 
 ```bash
 cargo add icicle-snark
@@ -62,7 +62,7 @@ or add the following to your Cargo.toml
 icicle-snark = { git = "https://github.com/ingonyama-zk/icicle-snark" }
 ```
 
-#### Then you can use it directly in your code
+### Then you can use it directly in your code
 
 ```rust
 use icicle_snark::{groth16_prove, CacheManager};
@@ -74,6 +74,7 @@ fn main() {
     let zkey = "./circuit_final.zkey";
     let proof = "./proof.json";
     let public = "./public.json";
+
     let device = "CUDA"; // or CPU
 
     for _ in 0..10 {
@@ -96,10 +97,10 @@ Navigate to examples/python folder to see example usage
 
 We benched the code on 2 different setups:
 
-- 4080 & i9-13900K
+- 4080 & i9–13900K
 - 4090 & Ryzen 9 9950X
 
-We used the circuits in the MoPro's benchmark repository to compare the proving systems.
+We used the circuits in the MoPro’s benchmark repository to compare the proving systems.
 
 - **Complex Circuits**: These circuits are for pure benchmarking purposes. It allows us to compare the performance of the provers based on a number of constraints.
 - **Anon Aadhaar**: Anon Aadhaar is a zero-knowledge protocol that allows Aadhaar ID owners to prove their identity in a privacy preserving way.
@@ -128,19 +129,19 @@ We have provided some sample circuits under benchmark folder. However to run the
 
 > Commands below are from [snarkjs](https://github.com/iden3/snarkjs) repository's README.
 
-#### Compile the circuit
+### Compile the circuit
 
 ```bash
 circom --r1cs --wasm --c --sym circuit.circom
 ```
 
-#### Calculate the witness
+### Calculate the witness
 
 ```bash
 snarkjs wtns calculate circuit_js/circuit.wasm input.json witness.wtns
 ```
 
-#### Setup and Contributions
+### Setup and Contributions
 
 ```bash
 snarkjs groth16 setup circuit.r1cs pot_final.ptau circuit_0000.zkey
@@ -152,13 +153,13 @@ snarkjs zkey import bellman circuit_0002.zkey response_phase2_0003 circuit_0003.
 snarkjs zkey beacon circuit_0003.zkey circuit_final.zkey 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f 10 -n="Final Beacon phase2"
 ```
 
-#### Verify the final key
+### Verify the final key
 
 ```bash
 snarkjs zkey verify circuit.r1cs pot14_final.ptau circuit_final.zkey
 ```
 
-#### Export the verification key
+### Export the verification key
 
 ```bash
 snarkjs zkey export verificationkey circuit_final.zkey verification_key.json
