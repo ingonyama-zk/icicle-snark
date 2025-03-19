@@ -75,7 +75,10 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
-    pub fn compute(&mut self, zkey_path: impl AsRef<Path>) -> Result<ZKeyCache, Box<dyn std::error::Error>> {
+    pub fn compute(
+        &mut self,
+        zkey_path: impl AsRef<Path>,
+    ) -> Result<ZKeyCache, Box<dyn std::error::Error>> {
         let mut stream = IcicleStream::create().unwrap();
 
         let (fd_zkey, sections_zkey) = FileWrapper::read_bin_file(zkey_path, "zkey", 2).unwrap();
@@ -198,6 +201,7 @@ impl CacheManager {
 
         Ok(cache_entry)
     }
+
     pub fn get_cache(&mut self, key: &str) -> &mut ZKeyCache {
         let cache = self.cache.get_mut(key).unwrap();
 
@@ -213,12 +217,15 @@ impl CacheManager {
 
         cache
     }
+
     pub fn insert_cache(&mut self, key: &str, cache: ZKeyCache) {
         self.cache.insert(key.to_string(), cache);
     }
+
     pub fn contains(&self, key: &str) -> bool {
         self.cache.contains_key(key)
     }
+
     fn pre_compute_keys(
         mut key: ScalarField,
         inc: ScalarField,

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::{
     F, ProjectiveG1, ProjectiveG2,
     cache::ZKeyCache,

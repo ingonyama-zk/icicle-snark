@@ -20,7 +20,7 @@ For a deeper dive into performance benchmarks and optimizations, check out our b
 
 ### 3. Set the Installation Path
 
-- Define the environment variable `ICICLE_BACKEND_INSTALL_DIR` to point to the extracted binary directory:
+- Define the environment variable `ICICLE_BACKEND_INSTALL_DIR` to point to the extracted library directory `icicle`:
 
 ```bash
 export ICICLE_BACKEND_INSTALL_DIR=/path/to/icicle
@@ -32,7 +32,7 @@ export ICICLE_BACKEND_INSTALL_DIR=/path/to/icicle
 
 To execute a proof, specify the paths for the witness file, zkey file, and output paths for the proof and public JSONs.
 
-### Example Usage
+### Example Usage:
 
 ```bash
 cargo run --release
@@ -68,17 +68,18 @@ icicle-snark = { git = "https://github.com/ingonyama-zk/icicle-snark" }
 use icicle_snark::{groth16_prove, CacheManager};
 
 fn main() {
-    let mut cache_manager = CacheManager::new();
+    let mut cache_manager = CacheManager::default();
 
-    let witness = "./witness.wtns".to_string();
-    let zkey = "./circuit_final.zkey".to_string();
-    let proof = "./proof.json".to_string();
-    let public = "./public.json".to_string();
+    let witness = "./witness.wtns";
+    let zkey = "./circuit_final.zkey";
+    let proof = "./proof.json";
+    let public = "./public.json";
+
     let device = "CUDA"; // or CPU
 
     for _ in 0..10 {
-        groth16_prove(&witness, &zkey, &proof, &public, device, &mut cache_manager).unwrap();
-    }   
+        groth16_prove(witness, zkey, proof, public, device, &mut cache_manager).unwrap();
+    }
 }
 ```
 
@@ -105,7 +106,7 @@ We used the circuits in the MoPro’s benchmark repository to compare the provin
 - **Anon Aadhaar**: Anon Aadhaar is a zero-knowledge protocol that allows Aadhaar ID owners to prove their identity in a privacy preserving way.
 - **Aptos Keyless**: Aptos Keyless lets users create self-custodial Aptos accounts with OIDC credentials (e.g., Google, Apple) instead of secret keys or mnemonics.
 
-In production it’s more likely that a project is going to prove the same circuits. To utilize this we are using the Cache system. However the other tools we compare are CLI so they terminate after one proving. To keep things fair we provide both benchmarks with and without cache.
+In production it's more likely that a project is going to prove the same circuits. To utilize this we are using the Cache system. However the other tools we compare are CLI so they terminate after one proving. To keep things fair we provide both benchmarks with and without cache.
 
 <p align="center">
   <img src="./figures/4090_compare_to_snarkjs.png" alt="4090 Benchmark" width="45%">

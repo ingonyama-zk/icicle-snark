@@ -111,15 +111,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 device,
             }) => {
                 match system {
-                    ProofSystem::Groth16 => groth16_prove(
-                        &witness,
-                        &zkey,
-                        &proof,
-                        &public,
-                        &device,
-                        &mut cache_manager,
-                    )
-                    .unwrap(),
+                    ProofSystem::Groth16 => {
+                        groth16_prove(witness, zkey, proof, public, &device, &mut cache_manager)
+                            .unwrap()
+                    }
                 }
                 println!("COMMAND_COMPLETED");
             }
