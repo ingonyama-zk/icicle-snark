@@ -1,5 +1,11 @@
-use icicle_core::{curve::{Affine, Curve}, traits::{FieldImpl, MontgomeryConvertible}};
-use icicle_runtime::{memory::{DeviceVec, HostSlice}, stream::IcicleStream};
+use icicle_core::{
+    curve::{Affine, Curve},
+    traits::{FieldImpl, MontgomeryConvertible},
+};
+use icicle_runtime::{
+    memory::{DeviceVec, HostSlice},
+    stream::IcicleStream,
+};
 use num_bigint::BigUint;
 
 use crate::{G1, G2};
@@ -11,10 +17,7 @@ pub fn from_affine_mont<C: Curve>(points: &mut [Affine<C>]) {
         .copy_from_host_async(HostSlice::from_slice(points), &stream)
         .unwrap();
 
-
-    Affine::from_mont(&mut d_affine, &stream)
-        .wrap()
-        .unwrap();
+    Affine::from_mont(&mut d_affine, &stream).wrap().unwrap();
 
     d_affine
         .copy_to_host_async(HostSlice::from_mut_slice(points), &stream)
