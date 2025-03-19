@@ -2,9 +2,9 @@ use icicle_core::curve::Affine;
 use icicle_core::traits::FieldImpl;
 use memmap::{Mmap, MmapOptions};
 use serde::Serialize;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom};
 use std::mem;
-use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use crate::zkey::ZKey;
@@ -32,14 +32,13 @@ pub struct FileWrapper {
     pub mmap: Mmap,
 }
 
-impl FileWrapper
-{
+impl FileWrapper {
     pub fn new(file: File) -> io::Result<Self> {
         let mmap = unsafe { MmapOptions::new().map(&file)? };
-        Ok(Self { 
+        Ok(Self {
             file,
             reading_section: None,
-            mmap
+            mmap,
         })
     }
 
@@ -48,7 +47,11 @@ impl FileWrapper
         expected_type: &str,
         max_version: u32,
     ) -> io::Result<(File, Vec<Vec<Section>>)> {
-        let mut file = OpenOptions::new().read(true).write(true).open(file_name).unwrap();
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(file_name)
+            .unwrap();
 
         let mut buf = [0; 4];
         file.read_exact(&mut buf).unwrap();
@@ -99,7 +102,10 @@ impl FileWrapper
         Ok((file, sections))
     }
 
-    pub fn save_json_file<P: AsRef<Path>, T: Serialize>(path: P, data: &T) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_json_file<P: AsRef<Path>, T: Serialize>(
+        path: P,
+        data: &T,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let file = File::create(path)?;
         let writer = BufWriter::new(file);
         serde_json::to_writer_pretty(writer, data)?;
@@ -121,32 +127,30 @@ impl FileWrapper
         if sections.get(id_section).is_none() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                format!(
-                    "Missing section {}",
-                    id_section
-                ),
+                format!("Missing section {}", id_section),
             ));
         }
 
         if sections[id_section].len() > 1 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!(
-                    "Section Duplicated {}",
-                    id_section
-                ),
+                format!("Section Duplicated {}", id_section),
             ));
         }
 
         self.file
-            .seek(SeekFrom::Start(sections[id_section][0].p)).unwrap();
+            .seek(SeekFrom::Start(sections[id_section][0].p))
+            .unwrap();
         self.reading_section = Some(sections[id_section][0].clone());
 
         Ok(())
     }
 
     pub fn end_read_section(&mut self, no_check: bool) -> io::Result<()> {
-        let section = self.reading_section.take().ok_or(io::Error::new(io::ErrorKind::InvalidInput, "Not reading"))?;
+        let section = self
+            .reading_section
+            .take()
+            .ok_or(io::Error::new(io::ErrorKind::InvalidInput, "Not reading"))?;
         if !no_check && self.file.stream_position()? - section.p != section.size {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "Size mismatch"));
         }
@@ -178,7 +182,11 @@ impl FileWrapper
         Ok(u32::from_le_bytes(buf))
     }
 
-    pub fn read_section(&self, sections: &[Vec<Section>], id_section: usize) -> Result<&[u8], io::Error> {
+    pub fn read_section(
+        &self,
+        sections: &[Vec<Section>],
+        id_section: usize,
+    ) -> Result<&[u8], io::Error> {
         let start = sections[id_section][0].p as usize;
         let end = start + sections[id_section][0].size as usize;
 
@@ -201,16 +209,12 @@ impl FileWrapper
 
     pub fn read_g1(&mut self) -> G1 {
         let mut x = [0u8; 32];
-        self.file
-        .read_exact(&mut x)
-        .unwrap();
+        self.file.read_exact(&mut x).unwrap();
 
         let x: [u32; 8] = unsafe { mem::transmute(x) };
 
         let mut y = [0u8; 32];
-        self.file
-            .read_exact(&mut y)
-            .unwrap();
+        self.file.read_exact(&mut y).unwrap();
 
         let y: [u32; 8] = unsafe { mem::transmute(y) };
 
@@ -219,16 +223,12 @@ impl FileWrapper
 
     pub fn read_g2(&mut self) -> G2 {
         let mut x = [0u8; 64];
-        self.file
-            .read_exact(&mut x)
-            .unwrap();
+        self.file.read_exact(&mut x).unwrap();
 
         let x: [u32; 16] = unsafe { std::mem::transmute(x) };
 
         let mut y = [0u8; 64];
-        self.file
-            .read_exact(&mut y)
-            .unwrap();
+        self.file.read_exact(&mut y).unwrap();
 
         let y: [u32; 16] = unsafe { std::mem::transmute(y) };
 

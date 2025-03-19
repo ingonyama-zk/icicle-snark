@@ -1,5 +1,5 @@
-use std::io::{self, BufRead, Write};
 use icicle_snark::{groth16_prove, CacheManager};
+use std::io::{self, BufRead, Write};
 
 enum ProofSystem {
     Groth16,
@@ -34,7 +34,7 @@ impl Command {
         let mut parts = command.split_whitespace();
         let command_type = parts.next()?;
         let mut proof_system = ProofSystem::Groth16;
-        
+
         match command_type {
             "prove" => {
                 let mut witness = "witness.wtns".to_string();
@@ -42,7 +42,7 @@ impl Command {
                 let mut proof = "proof.json".to_string();
                 let mut public = "public.json".to_string();
                 let mut device = "CUDA".to_string();
-                
+
                 while let Some(arg) = parts.next() {
                     match arg {
                         "--system" => {
@@ -64,7 +64,7 @@ impl Command {
                         _ => Command::print_help(),
                     }
                 }
-                
+
                 Some(Command::Prove {
                     system: proof_system,
                     witness,
@@ -74,7 +74,7 @@ impl Command {
                     device,
                 })
             }
-            _ => None
+            _ => None,
         }
     }
 }
@@ -102,9 +102,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         match Command::parse_command(command) {
-            Some(Command::Prove { system, witness, zkey, proof, public, device }) => {
+            Some(Command::Prove {
+                system,
+                witness,
+                zkey,
+                proof,
+                public,
+                device,
+            }) => {
                 match system {
-                    ProofSystem::Groth16 => groth16_prove(&witness, &zkey, &proof, &public, &device, &mut cache_manager).unwrap(),
+                    ProofSystem::Groth16 => groth16_prove(
+                        &witness,
+                        &zkey,
+                        &proof,
+                        &public,
+                        &device,
+                        &mut cache_manager,
+                    )
+                    .unwrap(),
                 }
                 println!("COMMAND_COMPLETED");
             }

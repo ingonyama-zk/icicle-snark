@@ -1,11 +1,19 @@
 use crate::{
-    cache::ZKeyCache, conversions::{from_u8, serialize_g1_affine, serialize_g2_affine}, file_wrapper::FileWrapper, icicle_helper::{msm_helper, ntt_helper}, ProjectiveG1, ProjectiveG2, F
+    cache::ZKeyCache,
+    conversions::{from_u8, serialize_g1_affine, serialize_g2_affine},
+    file_wrapper::FileWrapper,
+    icicle_helper::{msm_helper, ntt_helper},
+    ProjectiveG1, ProjectiveG2, F,
 };
 use icicle_bn254::curve::ScalarField;
 use icicle_core::{
-    traits::{FieldImpl, MontgomeryConvertible}, vec_ops::{mul_scalars, sub_scalars, VecOpsConfig}
+    traits::{FieldImpl, MontgomeryConvertible},
+    vec_ops::{mul_scalars, sub_scalars, VecOpsConfig},
 };
-use icicle_runtime::{memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice}, stream::IcicleStream};
+use icicle_runtime::{
+    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice},
+    stream::IcicleStream,
+};
 use num_bigint::BigUint;
 use serde::Serialize;
 use serde_json::Value;
@@ -20,17 +28,13 @@ use icicle_core::traits::GenerateRandom;
 #[derive(Serialize)]
 pub struct Proof {
     pub pi_a: Vec<String>,
-    pub pi_b: Vec<Vec<String>>, 
+    pub pi_b: Vec<Vec<String>>,
     pub pi_c: Vec<String>,
     pub protocol: String,
     pub curve: String,
 }
 
-pub fn construct_r1cs(
-    witness: &[ScalarField],
-    zkey_cache: &ZKeyCache,
-) -> DeviceVec<ScalarField>
-{
+pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<ScalarField> {
     let mut stream = IcicleStream::create().unwrap();
     let mut cfg = VecOpsConfig::default();
     cfg.is_async = true;
@@ -51,20 +55,29 @@ pub fn construct_r1cs(
     let keys = &zkey_cache.keys;
 
     let mut second_slice = Vec::with_capacity(n_coef);
-    unsafe { second_slice.set_len(n_coef); }
+    unsafe {
+        second_slice.set_len(n_coef);
+    }
 
-    second_slice.par_iter_mut().enumerate().for_each(|(i, slice_elem)| {
-        let s = s_values[i];
-        *slice_elem = witness[s];
-    });
+    second_slice
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(i, slice_elem)| {
+            let s = s_values[i];
+            *slice_elem = witness[s];
+        });
 
     let second_slice = HostSlice::from_mut_slice(&mut second_slice);
 
     let mut res = Vec::with_capacity(n_coef);
-    unsafe { res.set_len(n_coef); }
+    unsafe {
+        res.set_len(n_coef);
+    }
     let res = HostSlice::from_mut_slice(&mut res);
 
-    d_second_slice.copy_from_host_async(second_slice, &stream).unwrap();
+    d_second_slice
+        .copy_from_host_async(second_slice, &stream)
+        .unwrap();
     ScalarField::from_mont(&mut d_second_slice, &stream);
     mul_scalars(&first_slice[..], &d_second_slice, res, &cfg).unwrap();
 
@@ -74,7 +87,7 @@ pub fn construct_r1cs(
 
     for i in 0..n_coef {
         let c = c_values[i];
-        let m =  m_values[i];
+        let m = m_values[i];
         let idx = c + m * nof_coef;
         let value = &mut out_buff_b_a[idx];
 
@@ -85,34 +98,73 @@ pub fn construct_r1cs(
         }
     }
 
-    d_vec[0..nof_coef].copy_from_host_async(HostSlice::from_slice(&out_buff_b_a[nof_coef..]), &stream).unwrap();
-    d_vec[nof_coef..nof_coef * 2].copy_from_host_async(HostSlice::from_slice(&out_buff_b_a[..nof_coef]), &stream).unwrap();
+    d_vec[0..nof_coef]
+        .copy_from_host_async(HostSlice::from_slice(&out_buff_b_a[nof_coef..]), &stream)
+        .unwrap();
+    d_vec[nof_coef..nof_coef * 2]
+        .copy_from_host_async(HostSlice::from_slice(&out_buff_b_a[..nof_coef]), &stream)
+        .unwrap();
 
     let d_vec_copy = unsafe {
         DeviceSlice::from_mut_slice(std::slice::from_raw_parts_mut(
             d_vec.as_mut_ptr(),
-            d_vec.len()
+            d_vec.len(),
         ))
     };
 
-    mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[2 * nof_coef..], &cfg).unwrap();
-    
+    mul_scalars(
+        &d_vec[0..nof_coef],
+        &d_vec[nof_coef..nof_coef * 2],
+        &mut d_vec_copy[2 * nof_coef..],
+        &cfg,
+    )
+    .unwrap();
+
     ntt_helper(&mut d_vec, true, &stream);
 
-    mul_scalars(&d_vec[..nof_coef], &keys[..], &mut d_vec_copy[..nof_coef], &cfg).unwrap();
-    mul_scalars(&d_vec[nof_coef..nof_coef * 2], &keys[..], &mut d_vec_copy[nof_coef..2 * nof_coef], &cfg).unwrap();
-    mul_scalars(&d_vec[nof_coef * 2..], &keys[..], &mut d_vec_copy[2 * nof_coef..], &cfg).unwrap();
+    mul_scalars(
+        &d_vec[..nof_coef],
+        &keys[..],
+        &mut d_vec_copy[..nof_coef],
+        &cfg,
+    )
+    .unwrap();
+    mul_scalars(
+        &d_vec[nof_coef..nof_coef * 2],
+        &keys[..],
+        &mut d_vec_copy[nof_coef..2 * nof_coef],
+        &cfg,
+    )
+    .unwrap();
+    mul_scalars(
+        &d_vec[nof_coef * 2..],
+        &keys[..],
+        &mut d_vec_copy[2 * nof_coef..],
+        &cfg,
+    )
+    .unwrap();
 
     ntt_helper(&mut d_vec, false, &stream);
 
     stream.synchronize().unwrap();
     stream.destroy().unwrap();
 
-    
     // L * R - O
     let cfg: VecOpsConfig = VecOpsConfig::default();
-    mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[0..nof_coef], &cfg).unwrap();
-    sub_scalars(&d_vec[0..nof_coef], &d_vec[2 * nof_coef..], &mut d_vec_copy[nof_coef..nof_coef * 2], &cfg).unwrap();
+    mul_scalars(
+        &d_vec[0..nof_coef],
+        &d_vec[nof_coef..nof_coef * 2],
+        &mut d_vec_copy[0..nof_coef],
+        &cfg,
+    )
+    .unwrap();
+    sub_scalars(
+        &d_vec[0..nof_coef],
+        &d_vec[2 * nof_coef..],
+        &mut d_vec_copy[nof_coef..nof_coef * 2],
+        &cfg,
+    )
+    .unwrap();
 
     d_vec
 }
@@ -120,8 +172,14 @@ pub fn construct_r1cs(
 pub fn groth16_commitments(
     d_vec: DeviceVec<F>,
     scalars: &[F],
-    zkey_cache: &ZKeyCache
-) -> (ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1) {
+    zkey_cache: &ZKeyCache,
+) -> (
+    ProjectiveG1,
+    ProjectiveG1,
+    ProjectiveG2,
+    ProjectiveG1,
+    ProjectiveG1,
+) {
     let nof_coef = zkey_cache.zkey.domain_size;
     // A, B, C
     let points_a = &zkey_cache.points_a;
@@ -139,10 +197,14 @@ pub fn groth16_commitments(
 
     let commitment_a = msm_helper(&d_scalars[..], points_a, &stream_g1);
     let commitment_b1 = msm_helper(&d_scalars[..], points_b1, &stream_g1);
-    let commitment_c = msm_helper(&d_scalars[zkey_cache.zkey.n_public + 1..], points_c, &stream_g1);
+    let commitment_c = msm_helper(
+        &d_scalars[zkey_cache.zkey.n_public + 1..],
+        points_c,
+        &stream_g1,
+    );
     let commitment_h = msm_helper(&d_vec[nof_coef..nof_coef * 2], points_h, &stream_g1);
     let commitment_b = msm_helper(&d_scalars[..], points_b, &stream_g2);
-    
+
     let mut pi_a = [ProjectiveG1::zero(); 1];
     let mut pi_b1 = [ProjectiveG1::zero(); 1];
     let mut pi_b = [ProjectiveG2::zero(); 1];
@@ -160,7 +222,7 @@ pub fn groth16_commitments(
     commitment_b
         .copy_to_host_async(HostSlice::from_mut_slice(&mut pi_b[..]), &stream_g2)
         .unwrap();
-    
+
     commitment_c
         .copy_to_host_async(HostSlice::from_mut_slice(&mut pi_c[..]), &stream_g1)
         .unwrap();
@@ -205,10 +267,7 @@ pub fn groth16_prove_helper(
 
     let scalars = from_u8(buff_witness);
 
-    let d_vec = construct_r1cs(
-        scalars,
-        zkey_cache,
-    );
+    let d_vec = construct_r1cs(scalars, zkey_cache);
 
     let (pi_a, pi_b1, pi_b, pi_c, pi_h) = groth16_commitments(d_vec, scalars, zkey_cache);
 

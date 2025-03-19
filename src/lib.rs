@@ -40,7 +40,7 @@ pub fn groth16_prove(
     try_load_and_set_backend_device(device);
 
     let cache_key = format!("{}_{}", zkey, device);
-    
+
     if !cache_manager.contains(&cache_key) {
         let computed_cache = cache_manager.compute(zkey)?;
         cache_manager.insert_cache(&cache_key, computed_cache);
