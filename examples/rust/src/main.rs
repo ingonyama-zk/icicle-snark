@@ -4,7 +4,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 const NUMBER_OF_WARMUP: usize = 2;
-const NUMBER_OF_ITERATIONS: usize = 5;
+const NUMBER_OF_ITERATIONS: usize = 10;
 
 fn main() {
     let mut cache_manager = CacheManager::default();

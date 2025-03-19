@@ -43,14 +43,14 @@ impl FileWrapper {
     }
 
     pub fn read_bin_file(
-        file_name: &str,
+        file_path: impl AsRef<Path>,
         expected_type: &str,
         max_version: u32,
     ) -> io::Result<(File, Vec<Vec<Section>>)> {
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(file_name)
+            .open(&file_path)
             .unwrap();
 
         let mut buf = [0; 4];
@@ -60,7 +60,7 @@ impl FileWrapper {
         if read_type != expected_type {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("{}: Invalid File format", file_name),
+                format!("{:?}: Invalid File format", &file_path.as_ref()),
             ));
         }
 

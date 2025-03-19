@@ -75,7 +75,7 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
-    pub fn compute(&mut self, zkey_path: &str) -> Result<ZKeyCache, Box<dyn std::error::Error>> {
+    pub fn compute(&mut self, zkey_path: impl AsRef<Path>) -> Result<ZKeyCache, Box<dyn std::error::Error>> {
         let mut stream = IcicleStream::create().unwrap();
 
         let (fd_zkey, sections_zkey) = FileWrapper::read_bin_file(zkey_path, "zkey", 2).unwrap();
