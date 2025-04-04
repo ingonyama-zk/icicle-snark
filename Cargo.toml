@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-icicle-core = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-core", version = "3.6"}
-icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-bn254", version = "3.6"}
-icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-runtime", version = "3.6"}
+icicle-core = { path = "./wrappers/rust/icicle-core", package = "icicle-core"}
+icicle-bn254 = { path = "./wrappers/rust/icicle-curves/icicle-bn254", package = "icicle-bn254"}
+icicle-runtime = { path = "./wrappers/rust/icicle-runtime", package = "icicle-runtime"}
 serde = { version="1.0.216", features = ["derive"] }
 serde_json = { version="1.0.125" } 
 num-bigint = "0.4.6"
