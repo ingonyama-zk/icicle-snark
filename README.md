@@ -9,22 +9,26 @@ For a deeper dive into performance benchmarks and optimizations, check out our b
 
 ## Installation
 
-### 1. Download the Release Binaries
-- Download the latest v3.x release binaries from the [ICICLE Releases](https://github.com/ingonyama-zk/icicle/releases/latest/).
+### 1. Build CUDA Backend
 
-### 2. Install the Binaries
-- Extract the downloaded binaries to a directory of your choice.
+```bash
+cd icicle/
+cmake -DCMAKE_BUILD_TYPE=Release -DCURVE=bn254 -DCUDA_BACKEND=local -S . -B build
+cmake --build build -j
+```
 
-### 3. Set the Installation Path
+### 2. Set the Installation Path
+
 - Define the environment variable `ICICLE_BACKEND_INSTALL_DIR` to point to the extracted binary directory:
 
 ```bash
-export ICICLE_BACKEND_INSTALL_DIR=/path/to/icicle-binaries
+export ICICLE_BACKEND_INSTALL_DIR=path/icicle/build/backend
 ```
 
 ---
 
 ## Running Icicle-Snark in Worker Mode
+
 To execute a proof, specify the paths for the witness file, zkey file, and output paths for the proof and public JSONs.
 
 ### Example Usage:
