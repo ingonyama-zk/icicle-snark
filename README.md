@@ -7,9 +7,9 @@ For a deeper dive into performance benchmarks and optimizations, check out our b
 
 ---
 
-## Installation
+## Building CUDA Backend
 
-### 1. Build CUDA Backend
+### 1. Build
 
 ```bash
 cd icicle/
