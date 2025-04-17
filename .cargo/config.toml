@@ -1,0 +1,13 @@
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-lc++"]
+
+[target.aarch64-apple-ios-sim]
+rustflags = [
+    "-C", "link-arg=-lc++",
+    "-C", "link-arg=-fobjc-arc",
+    "-C", "link-arg=-isysroot",
+    "-C", "link-arg=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk",
+    "-C", "link-arg=-Wl,-rpath,@executable_path/Frameworks",
+    "-C", "link-arg=-Wl,-rpath,@loader_path",
+    "-C", "link-arg=-Wl,-rpath,@executable_path",
+]

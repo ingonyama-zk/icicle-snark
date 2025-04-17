@@ -4,9 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-icicle-core = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-core", version = "3.6"}
-icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-bn254", version = "3.6"}
-icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-runtime", version = "3.6"}
+#icicle-core = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-core",  rev = "b9a31470672e4e3339907a6fa8ef7517a96bac8e" }
+#icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-bn254", rev = "b9a31470672e4e3339907a6fa8ef7517a96bac8e" }
+#icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-runtime", rev = "b9a31470672e4e3339907a6fa8ef7517a96bac8e" }
+
+
+icicle-core = { path = "/Users/stas/Projects/ingonyama-zk/icicle/wrappers/rust/icicle-core" }
+icicle-runtime = { path = "/Users/stas/Projects/ingonyama-zk/icicle/wrappers/rust/icicle-runtime" }
+icicle-bn254 = { path = "/Users/stas/Projects/ingonyama-zk/icicle/wrappers/rust/icicle-curves/icicle-bn254" }
+
 serde = { version="1.0.216", features = ["derive"] }
 serde_json = { version="1.0.125" } 
 num-bigint = "0.4.6"
@@ -17,3 +23,14 @@ clap = { version="4.5.23", features=["derive"] }
 
 [features]
 no-randomness=[]
+
+
+[target.aarch64-apple-ios-sim]
+rustflags = [
+    "-C", "link-args=-static",             # Force static linking
+    "-C", "link-args=-Wl,-no_compact_unwind"  # Fix for macOS linker
+]
+
+[profile.release]
+lto = true
+codegen-units = 1
