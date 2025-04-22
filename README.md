@@ -6,7 +6,16 @@ The Icicle Snark implementation in this repository provides efficient proof gene
 
 For a deeper dive into performance benchmarks and optimizations, check out our blog post: [ICICLE-Snark: The Fastest Groth16 Implementation in the World](https://medium.com/@ingonyama/icicle-snark-the-fastest-groth16-implementation-in-the-world-00901b39a21f)
 
----
+For a short video explainer illustrating how to use ICICLE-Snark and switching between backends, see here:
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=qFo3yBufW2w" target="_blank">
+    <img src="https://img.youtube.com/vi/qFo3yBufW2w/maxresdefault.jpg" alt="Watch the video" width="600">
+  </a>
+</p>
+
+<p align="center"><strong>Click the image to watch the demo</strong></p>
+
 
 ## Building CUDA Backend
 
