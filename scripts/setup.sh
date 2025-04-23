@@ -17,7 +17,10 @@ snarkjs wtns calculate circuit_js/circuit.wasm input.json witness.wtns
 # === 3. Get the power of tau from r1cs info ===
 echo "📊 Extracting constraint count from R1CS..."
 CONSTRAINTS=$(snarkjs r1cs info circuit.r1cs | grep "# of Constraints" | cut -d':' -f3 | xargs)
-POWER=$(python3 -c "import math; print(math.ceil(math.log2(${CONSTRAINTS})))")
+POWER=$(python3 -c "import math; print(max(8, math.ceil(math.log2(${CONSTRAINTS} + 1))))")
+if [ "$POWER" -lt 10 ]; then
+    POWER=$(printf "%02d" $POWER)
+fi
 echo "⚡ Computed power of tau: $POWER"
 
 # === 4. Powers of Tau ceremony ===
