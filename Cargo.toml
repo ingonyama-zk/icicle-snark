@@ -3,6 +3,10 @@ name = "icicle-snark"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "icicle_snark"
+# crate-type = ["staticlib"]
+
 [dependencies]
 #icicle-core = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-core",  rev = "b9a31470672e4e3339907a6fa8ef7517a96bac8e" }
 #icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-bn254", rev = "b9a31470672e4e3339907a6fa8ef7517a96bac8e" }
@@ -24,6 +28,14 @@ clap = { version="4.5.23", features=["derive"] }
 [features]
 no-randomness=[]
 
+
+[target.aarch64-apple-ios]
+rustflags = [
+    "-C", "link-args=-static",             # Force static linking
+    "-C", "link-args=-Wl,-export_dynamic",  # Export all symbols
+    "-C", "link-args=-Wl,-force_load",     # Force load all symbols
+    "-C", "link-args=-Wl,-no_compact_unwind"  # Fix for macOS linker
+]
 
 [target.aarch64-apple-ios-sim]
 rustflags = [
