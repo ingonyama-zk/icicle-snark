@@ -221,11 +221,12 @@ impl CacheManager {
         inc: ScalarField,
         size: usize,
     ) -> io::Result<Vec<ScalarField>> {
-        let file_path = format!("precomputed_{}_{}.bin", size, inc);
-        let file: &Path = Path::new(&file_path);
+        // Get temporary directory from environment variable
+        let tmp_dir = std::env::var("TMPDIR").unwrap_or_else(|_| String::from("."));
+        let file_path = Path::new(&tmp_dir).join(format!("precomputed_{}_{}.bin", size, inc));
     
-        if file.exists() {
-            let keys = CacheManager::load_from_binary_file(file)?;
+        if file_path.exists() {
+            let keys = CacheManager::load_from_binary_file(&file_path)?;
             return Ok(keys);
         }
     
@@ -236,7 +237,7 @@ impl CacheManager {
             key = key * inc;
         }
     
-        CacheManager::save_to_binary_file(&keys, file)?;
+        CacheManager::save_to_binary_file(&keys, &file_path)?;
     
         Ok(keys)
     }

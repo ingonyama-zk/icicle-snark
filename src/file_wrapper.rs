@@ -48,16 +48,36 @@ impl FileWrapper
         expected_type: &str,
         max_version: u32,
     ) -> io::Result<(File, Vec<Vec<Section>>)> {
-        let mut file = OpenOptions::new().read(true).write(true).open(file_name).unwrap();
+        println!("Attempting to open file: {}", file_name);
+        let mut file = match OpenOptions::new().read(true).write(true).open(file_name) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("Failed to open file '{}': {} (error kind: {:?})", file_name, e, e.kind());
+                return Err(io::Error::new(
+                    e.kind(),
+                    format!("Failed to open file '{}': {}", file_name, e)
+                ));
+            }
+        };
+        println!("Successfully opened file: {}", file_name);
 
         let mut buf = [0; 4];
         file.read_exact(&mut buf).unwrap();
-        let read_type = String::from_utf8(buf.to_vec()).expect("Invalid UTF-8 sequence");
+        
+        let read_type = match String::from_utf8(buf.to_vec()) {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid UTF-8 sequence in file '{}': {}", file_name, e)
+                ));
+            }
+        };
 
         if read_type != expected_type {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("{}: Invalid File format", file_name),
+                format!("File '{}' has invalid format. Expected '{}', got '{}'", file_name, expected_type, read_type)
             ));
         }
 

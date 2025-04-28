@@ -120,3 +120,8 @@ The `ios.sh` script provides a convenient way to build, copy files, and run the 
 - The script verifies dependencies and file existence before operations
 - Debug mode can be enabled by uncommenting `set -x` at the top of the script
 
+
+
+## run on iOS simulator
+
+I use a separate project ingonyama-zk/groth16-ios to run icicle-snark on iphone
