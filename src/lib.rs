@@ -39,18 +39,14 @@ pub fn groth16_prove(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
     try_load_and_set_backend_device(device);
-
     let cache_key = format!("{}_{}", zkey, device);
     
     if !cache_manager.contains(&cache_key) {
         let computed_cache = cache_manager.compute(zkey)?;
         cache_manager.insert_cache(&cache_key, computed_cache);
     }
-
     let zkey_cache = cache_manager.get_cache(&cache_key);
-
     let (proof_data, public_signals) = groth16_prove_helper(witness, zkey_cache)?;
-
     FileWrapper::save_json_file(proof, &proof_data)?;
     FileWrapper::save_json_file(public, &public_signals)?;
 

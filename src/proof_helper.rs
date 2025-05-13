@@ -181,7 +181,7 @@ pub fn groth16_commitments(
 pub fn groth16_prove_helper(
     witness: &str,
     zkey_cache: &ZKeyCache,
-) -> Result<(Value, Value), Box<dyn std::error::Error>> {
+) -> Result<(Value, Value), Box<dyn std::error::Error>> {   
     let (fd_wtns, sections_wtns) = FileWrapper::read_bin_file(witness, "wtns", 2).unwrap();
 
     let mut wtns_file = FileWrapper::new(fd_wtns).unwrap();

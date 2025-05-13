@@ -11,15 +11,12 @@ pub fn from_affine_mont<C: Curve>(points: &mut [Affine<C>]) {
         .copy_from_host_async(HostSlice::from_slice(points), &stream)
         .unwrap();
 
-
     Affine::from_mont(&mut d_affine, &stream)
         .wrap()
         .unwrap();
-
     d_affine
         .copy_to_host_async(HostSlice::from_mut_slice(points), &stream)
         .unwrap();
-
     stream.synchronize().unwrap();
     stream.destroy().unwrap();
 }

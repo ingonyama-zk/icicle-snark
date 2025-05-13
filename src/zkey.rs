@@ -66,10 +66,8 @@ impl ZKey {
 
         let mut mont_points_g1 = [vk_alpha_1, vk_beta_1, vk_delta_1];
         let mut mont_points_g2 = [vk_beta_2, vk_gamma_2, vk_delta_2];
-
         from_affine_mont::<C1>(&mut mont_points_g1);
         from_affine_mont::<C2>(&mut mont_points_g2);
-
         zkey.vk_alpha_1 = mont_points_g1[0].to_projective();
         zkey.vk_beta_1 = mont_points_g1[1].to_projective();
         zkey.vk_beta_2 = mont_points_g2[0].to_projective();

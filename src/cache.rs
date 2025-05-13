@@ -77,11 +77,9 @@ impl CacheManager {
         let (fd_zkey, sections_zkey) = FileWrapper::read_bin_file(zkey_path, "zkey", 2).unwrap();
     
         let mut zkey_file = FileWrapper::new(fd_zkey).unwrap();
-    
+
         let zkey = zkey_file.read_zkey_header(&sections_zkey[..]).unwrap();
-
         let buff_coeffs = zkey_file.read_section(&sections_zkey[..], 4).unwrap();
-
         let s_coef = 4 * 3 + zkey.n8r;
         let n_coef = (buff_coeffs.len() - 4) / s_coef;
 

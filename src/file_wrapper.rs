@@ -48,7 +48,6 @@ impl FileWrapper
         expected_type: &str,
         max_version: u32,
     ) -> io::Result<(File, Vec<Vec<Section>>)> {
-        println!("Attempting to open file: {}", file_name);
         let mut file = match OpenOptions::new().read(true).write(true).open(file_name) {
             Ok(f) => f,
             Err(e) => {
@@ -59,7 +58,6 @@ impl FileWrapper
                 ));
             }
         };
-        println!("Successfully opened file: {}", file_name);
 
         let mut buf = [0; 4];
         file.read_exact(&mut buf).unwrap();
@@ -209,7 +207,6 @@ impl FileWrapper
         self.start_read_unique_section(sections, 1).unwrap();
         let protocol_id = self.read_u32_le().unwrap();
         self.end_read_section(false).unwrap();
-
         match protocol_id {
             GROTH16_PROTOCOL_ID => ZKey::read_header_groth16(self, sections),
             _ => Err(io::Error::new(
