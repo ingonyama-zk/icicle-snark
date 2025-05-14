@@ -4,21 +4,31 @@
 #include "gpu-utils/error_handler.h"
 
 template <typename E>
-static E* allocate_on_device(size_t byte_size, cudaStream_t cuda_stream)
+static E* allocate_on_device(size_t byte_size, cudaStream_t cuda_stream, bool is_async = true)
 {
   E* device_mem = nullptr;
-  cudaMallocAsync(&device_mem, byte_size, cuda_stream);
+  if (is_async) {
+    cudaMallocAsync(&device_mem, byte_size, cuda_stream);
+  } else {
+    cudaMalloc(&device_mem, byte_size);
+  }
   CHK_LAST();
 
   return device_mem;
 }
 
 template <typename E>
-static const E* allocate_and_copy_to_device(const E* host_mem, size_t byte_size, cudaStream_t cuda_stream)
+static const E*
+allocate_and_copy_to_device(const E* host_mem, size_t byte_size, cudaStream_t cuda_stream, bool is_async = true)
 {
   E* device_mem = nullptr;
-  cudaMallocAsync(&device_mem, byte_size, cuda_stream);
-  cudaMemcpyAsync(device_mem, host_mem, byte_size, cudaMemcpyHostToDevice, cuda_stream);
+  if (is_async) {
+    cudaMallocAsync(&device_mem, byte_size, cuda_stream);
+    cudaMemcpyAsync(device_mem, host_mem, byte_size, cudaMemcpyHostToDevice, cuda_stream);
+  } else {
+    cudaMalloc(&device_mem, byte_size);
+    cudaMemcpy(device_mem, host_mem, byte_size, cudaMemcpyHostToDevice);
+  }
   CHK_LAST();
 
   return device_mem;
