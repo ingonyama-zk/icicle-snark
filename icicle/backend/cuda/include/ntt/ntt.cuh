@@ -734,8 +734,8 @@ namespace ntt {
                       ? (is_inverse ? domain.fast_external_twiddles_inv : domain.fast_external_twiddles)
                       : domain.twiddles;
       S* internal_twiddles = is_fast_twiddles_enabled
-                                ? (is_inverse ? domain.fast_internal_twiddles_inv : domain.fast_internal_twiddles)
-                                : domain.internal_twiddles;
+                               ? (is_inverse ? domain.fast_internal_twiddles_inv : domain.fast_internal_twiddles)
+                               : domain.internal_twiddles;
       S* basic_twiddles = is_fast_twiddles_enabled
                             ? (is_inverse ? domain.fast_basic_twiddles_inv : domain.fast_basic_twiddles)
                             : domain.basic_twiddles;
@@ -745,7 +745,6 @@ namespace ntt {
         batch_size, config.columns_batch, is_inverse, is_fast_twiddles_enabled, config.ordering, coset, coset_index,
         cuda_stream));
     }
-
 
     if (!are_outputs_on_device)
       CHK_IF_RETURN(cudaMemcpyAsync(output, d_output, input_size_bytes, cudaMemcpyDeviceToHost, cuda_stream));
