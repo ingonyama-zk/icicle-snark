@@ -6,11 +6,14 @@ mod proof_helper;
 mod zkey;
 
 pub use cache::{CacheManager, ZKeyCache};
+use circom_witnesscalc::calc_witness;
 use file_wrapper::FileWrapper;
 use icicle_bn254::curve::{CurveCfg, G2CurveCfg, ScalarField};
 use icicle_core::curve::{Affine, Projective};
 use proof_helper::groth16_prove_helper;
 use std::time::Instant;
+use std::fs::File;
+use std::io::Write;
 
 pub type F = ScalarField;
 pub type C1 = CurveCfg;
@@ -26,6 +29,32 @@ fn try_load_and_set_backend_device(device_type: &str) {
     }
     let device = icicle_runtime::Device::new(device_type, 0 /* =device_id*/);
     icicle_runtime::set_device(&device).unwrap();
+}
+
+pub fn groth16_witness(
+    input: &str,
+    graph: &str,
+    witness: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input_data = std::fs::read_to_string(&input)
+    .expect("Failed to read input file");
+
+    let graph_data = std::fs::read(&graph).expect("Failed to read graph file");
+
+    let start = Instant::now();
+
+    let wtns_bytes = calc_witness(&input_data, &graph_data).unwrap();
+
+    let duration = start.elapsed();
+    println!("Witness generated in: {:?}", duration);
+
+    {
+        let mut f = File::create(&witness).unwrap();
+        f.write_all(&wtns_bytes).unwrap();
+    }
+
+    println!("witness saved to {}", &witness);
+    Ok(())
 }
 
 pub fn groth16_prove(
