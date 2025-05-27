@@ -49,18 +49,18 @@ const W: [&str; 30] = [
     "0x2260e724844bca5251829353968e4915305258418357473a5c1d597f613f6cbd",
 ];
 
-#[derive(Clone)]
+//#[derive(Clone)]
 pub struct ZKeyCache {
     pub s_values: Vec<usize>,
     pub c_values: Vec<usize>,
     pub m_values: Vec<usize>,
-    pub first_slice: Arc<DeviceVec<F>>,
-    pub points_a: Arc<DeviceVec<G1>>,
-    pub points_b1: Arc<DeviceVec<G1>>,
-    pub points_b: Arc<DeviceVec<G2>>,
-    pub points_h: Arc<DeviceVec<G1>>,
-    pub points_c: Arc<DeviceVec<G1>>,
-    pub keys: Arc<DeviceVec<F>>,
+    pub first_slice: DeviceVec<F>,
+    pub points_a: DeviceVec<G1>,
+    pub points_b1: DeviceVec<G1>,
+    pub points_b: DeviceVec<G2>,
+    pub points_h: DeviceVec<G1>,
+    pub points_c: DeviceVec<G1>,
+    pub keys: DeviceVec<F>,
     pub zkey: ZKey,
 }
 
@@ -182,13 +182,13 @@ impl CacheManager {
             c_values,
             m_values,
             zkey,
-            first_slice: Arc::new(d_first_slice),
-            points_a: Arc::new(d_points_a),
-            points_b1: Arc::new(d_points_b1),
-            points_b: Arc::new(d_points_b),
-            points_c: Arc::new(d_points_c),
-            points_h: Arc::new(d_points_h),
-            keys: Arc::new(d_keys),
+            first_slice: d_first_slice,
+            points_a: d_points_a,
+            points_b1: d_points_b1,
+            points_b: d_points_b,
+            points_c: d_points_c,
+            points_h: d_points_h,
+            keys: d_keys,
         };
 
         Ok(cache_entry)
