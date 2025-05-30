@@ -9,7 +9,7 @@ include "../utils/pack.circom";
 
 
 /// @title ExtractAndPackAsInt
-/// @notice Helper function to exract data at a position to a single int (assumes data is less than 31 bytes)
+/// @notice Helper function to extract data at a position to a single int (assumes data is less than 31 bytes)
 /// @dev This is only used for state now; but can work for district, name, etc if needed
 /// @param maxDataLength - Maximum length of the data
 /// @param extractPosition - Position of the data to extract (after which delimiter does the data start)
@@ -57,15 +57,15 @@ template ExtractAndPackAsInt(maxDataLength, extractPosition) {
 }
 
 
-/// @title TimetampExtractor
-/// @notice Extracts the timetamp when the QR was signed rounded to nearest hour
+/// @title TimestampExtractor
+/// @notice Extracts the timestamp when the QR was signed rounded to nearest hour
 /// @dev We ignore minutes and seconds to avoid identifying the user based on the precise timestamp
 /// @input nDelimitedData[maxDataLength] - QR data where each delimiter is 255 * n where n is order of the data
 /// @output timestamp - Unix timestamp on signature
 /// @output year - Year of the signature
 /// @output month - Month of the signature
 /// @output day - Day of the signature
-template TimetampExtractor(maxDataLength) {
+template TimestampExtractor(maxDataLength) {
     signal input nDelimitedData[maxDataLength];
 
     signal output timestamp;
@@ -268,7 +268,7 @@ template QRDataExtractor(maxDataLength) {
     signal output photo[photoPackSize()];
 
     // Create `nDelimitedData` - same as `data` but each delimiter is replaced with n * 255
-    // where n means the nth occurance of 255
+    // where n means the nth occurrence of 255
     // This is to verify `delimiterIndices` is correctly set for each extraction
     component is255[maxDataLength];
     component indexBeforePhoto[maxDataLength];
@@ -294,13 +294,13 @@ template QRDataExtractor(maxDataLength) {
     }
 
     // Extract timestamp
-    component timestampExtractor = TimetampExtractor(maxDataLength);
+    component timestampExtractor = TimestampExtractor(maxDataLength);
     timestampExtractor.nDelimitedData <== nDelimitedData;
     timestamp <== timestampExtractor.timestamp;
    
     // Extract age - and calculate if above 18
     // We use the year, month, day from the timestamp to calculate the age
-    // This wont be precise but avoid the need for additional `currentTime` input
+    // This won't be precise but avoid the need for additional `currentTime` input
     // User can generate fresh QR for accuracy if needed (on their 18th birthday)
     component ageExtractor = AgeExtractor(maxDataLength);
     ageExtractor.nDelimitedData <== nDelimitedData;
@@ -341,7 +341,7 @@ template QRDataExtractor(maxDataLength) {
     photo <== photoExtractor.out;
 
     // TODO: We might be able to optimize the extraction by left shifting data to delimiter
-    // before DOB (rotating data and not seting remamining to 0 like in VarShiftLeft), 
+    // before DOB (rotating data and not setting remaining to 0 like in VarShiftLeft), 
     // and then extracting DOB, gender simply by using indices
     // Pincode also only needs shift (without setting remaining to 0) as size is fixed
 }
