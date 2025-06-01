@@ -13,9 +13,9 @@ name = "icicle_snark"
 #icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle", package = "icicle-runtime", rev = "b9a31470672e4e3339907a6fa8ef7517a96bac8e" }
 
 
-icicle-core = { path = "/Users/stas/Projects/ingonyama-zk/icicle/wrappers/rust/icicle-core" }
-icicle-runtime = { path = "/Users/stas/Projects/ingonyama-zk/icicle/wrappers/rust/icicle-runtime" }
-icicle-bn254 = { path = "/Users/stas/Projects/ingonyama-zk/icicle/wrappers/rust/icicle-curves/icicle-bn254" }
+icicle-core = { path = "../icicle/frontend/wrappers/rust/icicle-core" }
+icicle-runtime = { path = "../icicle/frontend/wrappers/rust/icicle-runtime" }
+icicle-bn254 = { path = "../icicle/frontend/wrappers/rust/icicle-curves/icicle-bn254" }
 
 serde = { version="1.0.216", features = ["derive"] }
 serde_json = { version="1.0.125" } 
