@@ -320,8 +320,7 @@ pub fn groth16_verify_helper(
     let pi_c = deserialize_g1_affine(&proof.pi_c);
 
     let n_public = verification_key.n_public;
-    let mut ic = verification_key.ic.clone();
-    let h_ic = HostSlice::from_mut_slice(&mut ic);
+    let ic = verification_key.ic.clone();
 
     let mut public_scalars = Vec::with_capacity(n_public);
     for s in public.iter().take(n_public) {
@@ -329,24 +328,39 @@ pub fn groth16_verify_helper(
         let scalar = ScalarField::from_bytes_le(&hex.to_bytes_le());
         public_scalars.push(scalar);
     }
-    let h_public_scalars = HostSlice::from_mut_slice(&mut public_scalars);
 
-    let mut cpub = [G1Projective::zero(); 1];
-    let d_res = msm_helper(h_public_scalars, &h_ic[1..], &IcicleStream::default());
-    d_res.copy_to_host(HostSlice::from_mut_slice(&mut cpub)).unwrap();
-    cpub[0] = cpub[0] + ic[0].to_projective();
+    let mut cpub = ic[0].to_projective();
+    for i in 0..public_scalars.len() {
+        cpub = cpub + ic[i + 1].to_projective() * public_scalars[i];
+    }
 
     let neg_pi_a = ProjectiveG1::zero() - pi_a.to_projective();
 
     // e(-A, B) * e(cpub, gamma_2) * e(C, delta_2) * e(alpha_1, beta_2) = 1
-    let first = pairing(&neg_pi_a.into(), &pi_b).unwrap();
-    let second = pairing(&cpub[0].into(), &verification_key.vk_gamma_2).unwrap();
-    let third = pairing(&pi_c, &verification_key.vk_delta_2).unwrap();
-    let fourth = pairing(&verification_key.vk_alpha_1, &verification_key.vk_beta_2).unwrap();
+    let vk_gamma_2 = verification_key.vk_gamma_2.clone();
+    let vk_delta_2 = verification_key.vk_delta_2.clone();
+    let vk_alpha_1 = verification_key.vk_alpha_1.clone();
+    let vk_beta_2 = verification_key.vk_beta_2.clone();
 
-    let left = first * second * third * fourth;
+    let first_thread = std::thread::spawn(move || {
+        pairing(&neg_pi_a.into(), &pi_b).unwrap()
+    });
+    let second_thread = std::thread::spawn(move || {
+        pairing(&cpub.into(), &vk_gamma_2).unwrap()
+    });
+    let third_thread = std::thread::spawn(move || {
+        pairing(&pi_c, &vk_delta_2).unwrap()
+    });
+    let fourth_thread = std::thread::spawn(move || {
+        pairing(&vk_alpha_1, &vk_beta_2).unwrap()
+    });
 
-    let result = Field::one() == left;
+    let first = first_thread.join().unwrap();
+    let second = second_thread.join().unwrap();
+    let third = third_thread.join().unwrap();
+    let fourth = fourth_thread.join().unwrap();
+
+    let result = Field::one() == first * second * third * fourth;
 
     Ok(result)
 }
