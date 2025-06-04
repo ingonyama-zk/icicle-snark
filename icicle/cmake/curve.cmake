@@ -54,6 +54,7 @@ function(setup_curve_target CURVE CURVE_INDEX FEATURES_STRING)
   # Handle features
   handle_msm(icicle_curve "${FEATURES_LIST}")
   handle_g2(icicle_curve "${FEATURES_LIST}")
+  handle_pairing(icicle_curve "${FEATURES_LIST}")
   # Add additional feature handling calls here
 
   set_target_properties(icicle_curve PROPERTIES OUTPUT_NAME "icicle_curve_${CURVE}")

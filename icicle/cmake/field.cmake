@@ -49,6 +49,11 @@ function(setup_field_target FIELD FIELD_INDEX FEATURES_STRING)
   handle_field(icicle_field) # basic field methods, including vec ops
   # Handle features
   handle_ntt(icicle_field "${FEATURES_LIST}")
+  set(PAIRING_FIELD_INDICES "1" "2" "3")
+  list(FIND PAIRING_FIELD_INDICES "${FIELD_INDEX}" index)
+  if(NOT index EQUAL -1)
+    target_sources(icicle_field PRIVATE src/fields/ffi_extern_pairing_extension.cpp)
+  endif()
   # Add additional feature handling calls here
 
   set_target_properties(icicle_field PROPERTIES OUTPUT_NAME "icicle_field_${FIELD}")

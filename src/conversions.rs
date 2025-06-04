@@ -55,6 +55,47 @@ pub fn serialize_g2_affine(point: G2) -> Vec<Vec<String>> {
     ]
 }
 
+pub fn deserialize_g1_affine(data: &[String]) -> G1 {
+    let to_limbs = |s: &String| {
+        let mut bytes = BigUint::parse_bytes(s.as_bytes(), 10).unwrap().to_bytes_le();
+        bytes.resize(32, 0);
+        let mut limbs = [0u32; 8];
+        for (i, chunk) in bytes.chunks(4).enumerate() {
+            limbs[i] = u32::from_le_bytes(chunk.try_into().unwrap());
+        }
+        limbs
+    };
+
+    G1::from_limbs(to_limbs(&data[0]), to_limbs(&data[1]))
+}
+
+pub fn deserialize_g2_affine(data: &[Vec<String>]) -> G2 {
+    let to_limbs = |s: &String| {
+        let mut bytes = BigUint::parse_bytes(s.as_bytes(), 10).unwrap().to_bytes_le();
+        bytes.resize(32, 0);
+        let mut limbs = [0u32; 8];
+        for (i, chunk) in bytes.chunks(4).enumerate() {
+            limbs[i] = u32::from_le_bytes(chunk.try_into().unwrap());
+        }
+        limbs
+    };
+
+    let mut x_limbs = [0u32; 16];
+    let x_c0 = to_limbs(&data[0][0]);
+    let x_c1 = to_limbs(&data[0][1]);
+    x_limbs[..8].copy_from_slice(&x_c0);
+    x_limbs[8..].copy_from_slice(&x_c1);
+
+    let mut y_limbs = [0u32; 16];
+    let y_c0 = to_limbs(&data[1][0]);
+    let y_c1 = to_limbs(&data[1][1]);
+    y_limbs[..8].copy_from_slice(&y_c0);
+    y_limbs[8..].copy_from_slice(&y_c1);
+
+    G2::from_limbs(x_limbs, y_limbs)
+}
+
+
 pub fn from_u8<T>(data: &[u8]) -> &[T] {
     let num_data = data.len() / size_of::<T>();
 

@@ -6,7 +6,7 @@ use icicle_core::{
     traits::FieldImpl,
 };
 use icicle_runtime::{
-    memory::{DeviceSlice, DeviceVec},
+    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice},
     stream::IcicleStream,
 };
 
@@ -29,8 +29,8 @@ where
 }
 
 pub fn msm_helper<C: Curve + MSM<C>>(
-    scalars: &DeviceSlice<C::ScalarField>,
-    points: &DeviceSlice<Affine<C>>,
+    scalars: &(impl HostOrDeviceSlice<C::ScalarField> + ?Sized),
+    points: &(impl HostOrDeviceSlice<Affine<C>> + ?Sized),
     stream: &IcicleStream,
 ) -> DeviceVec<Projective<C>> {
     let mut msm_result = DeviceVec::<Projective<C>>::device_malloc_async(1, stream).unwrap();

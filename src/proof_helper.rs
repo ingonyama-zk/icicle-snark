@@ -1,21 +1,15 @@
 use crate::{
-    cache::ZKeyCache,
-    conversions::{from_u8, serialize_g1_affine, serialize_g2_affine},
-    file_wrapper::FileWrapper,
-    icicle_helper::{msm_helper, ntt_helper},
-    ProjectiveG1, ProjectiveG2, F,
+    cache::{VerificationKey, ZKeyCache}, conversions::{deserialize_g1_affine, deserialize_g2_affine, from_u8, serialize_g1_affine, serialize_g2_affine}, file_wrapper::FileWrapper, icicle_helper::{msm_helper, ntt_helper}, ProjectiveG1, ProjectiveG2, F
 };
-use icicle_bn254::curve::ScalarField;
+use icicle_bn254::curve::{G1Projective, ScalarField};
 use icicle_core::{
-    traits::{FieldImpl, MontgomeryConvertible},
-    vec_ops::{mul_scalars, sub_scalars, VecOpsConfig},
+    field::Field, pairing::pairing, traits::{FieldImpl, MontgomeryConvertible}, vec_ops::{mul_scalars, sub_scalars, VecOpsConfig}
 };
 use icicle_runtime::{
-    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice},
-    stream::IcicleStream,
+    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice}, stream::IcicleStream
 };
 use num_bigint::BigUint;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use serde_json::Value;
 
 use rayon::prelude::*;
@@ -25,7 +19,7 @@ use icicle_bn254::curve::ScalarCfg;
 #[cfg(not(feature = "no-randomness"))]
 use icicle_core::traits::GenerateRandom;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Proof {
     pub pi_a: Vec<String>,
     pub pi_b: Vec<Vec<String>>,
@@ -314,4 +308,45 @@ pub fn groth16_prove_helper(
     };
 
     Ok((serde_json::json!(proof), serde_json::json!(public_signals)))
+}
+
+pub fn groth16_verify_helper(
+    proof: &Proof,
+    public: &[String],
+    verification_key: &VerificationKey,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let pi_a = deserialize_g1_affine(&proof.pi_a);
+    let pi_b = deserialize_g2_affine(&proof.pi_b);
+    let pi_c = deserialize_g1_affine(&proof.pi_c);
+
+    let n_public = verification_key.n_public;
+    let mut ic = verification_key.ic.clone();
+    let h_ic = HostSlice::from_mut_slice(&mut ic);
+
+    let mut public_scalars = Vec::with_capacity(n_public);
+    for s in public.iter().take(n_public) {
+        let hex = BigUint::parse_bytes(s.as_bytes(), 10).unwrap();
+        let scalar = ScalarField::from_bytes_le(&hex.to_bytes_le());
+        public_scalars.push(scalar);
+    }
+    let h_public_scalars = HostSlice::from_mut_slice(&mut public_scalars);
+
+    let mut cpub = [G1Projective::zero(); 1];
+    let d_res = msm_helper(h_public_scalars, &h_ic[1..], &IcicleStream::default());
+    d_res.copy_to_host(HostSlice::from_mut_slice(&mut cpub)).unwrap();
+    cpub[0] = cpub[0] + ic[0].to_projective();
+
+    let neg_pi_a = ProjectiveG1::zero() - pi_a.to_projective();
+
+    // e(-A, B) * e(cpub, gamma_2) * e(C, delta_2) * e(alpha_1, beta_2) = 1
+    let first = pairing(&neg_pi_a.into(), &pi_b).unwrap();
+    let second = pairing(&cpub[0].into(), &verification_key.vk_gamma_2).unwrap();
+    let third = pairing(&pi_c, &verification_key.vk_delta_2).unwrap();
+    let fourth = pairing(&verification_key.vk_alpha_1, &verification_key.vk_beta_2).unwrap();
+
+    let left = first * second * third * fourth;
+
+    let result = Field::one() == left;
+
+    Ok(result)
 }

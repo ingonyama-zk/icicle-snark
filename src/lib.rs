@@ -5,15 +5,14 @@ mod icicle_helper;
 mod proof_helper;
 mod zkey;
 
+use cache::VerificationKey;
 pub use cache::{CacheManager, ZKeyCache};
-use circom_witnesscalc::calc_witness;
 use file_wrapper::FileWrapper;
 use icicle_bn254::curve::{CurveCfg, G2CurveCfg, ScalarField};
 use icicle_core::curve::{Affine, Projective};
-use proof_helper::groth16_prove_helper;
+use proof_helper::{groth16_prove_helper, groth16_verify_helper, Proof};
 use std::time::Instant;
-use std::fs::File;
-use std::io::Write;
+use serde_json;
 
 pub type F = ScalarField;
 pub type C1 = CurveCfg;
@@ -29,32 +28,6 @@ fn try_load_and_set_backend_device(device_type: &str) {
     }
     let device = icicle_runtime::Device::new(device_type, 0 /* =device_id*/);
     icicle_runtime::set_device(&device).unwrap();
-}
-
-pub fn groth16_witness(
-    input: &str,
-    graph: &str,
-    witness: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let input_data = std::fs::read_to_string(&input)
-    .expect("Failed to read input file");
-
-    let graph_data = std::fs::read(&graph).expect("Failed to read graph file");
-
-    let start = Instant::now();
-
-    let wtns_bytes = calc_witness(&input_data, &graph_data).unwrap();
-
-    let duration = start.elapsed();
-    println!("Witness generated in: {:?}", duration);
-
-    {
-        let mut f = File::create(&witness).unwrap();
-        f.write_all(&wtns_bytes).unwrap();
-    }
-
-    println!("witness saved to {}", &witness);
-    Ok(())
 }
 
 pub fn groth16_prove(
@@ -83,6 +56,27 @@ pub fn groth16_prove(
     FileWrapper::save_json_file(public, &public_signals)?;
 
     println!("proof took: {:?}", start.elapsed());
+
+    Ok(())
+}
+
+pub fn groth16_verify(
+    proof: &str,
+    public: &str,
+    vk: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let proof_str = std::fs::read_to_string(proof)?;
+    let proof: Proof = serde_json::from_str(&proof_str)?;
+
+    let public_str = std::fs::read_to_string(public)?;
+    let public: Vec<String> = serde_json::from_str(&public_str)?;
+
+    let vk_str = std::fs::read_to_string(vk)?;
+    let vk: VerificationKey = serde_json::from_str(&vk_str)?;
+
+    let pairing_result = groth16_verify_helper(&proof, &public, &vk)?;
+
+    assert!(pairing_result, "Verification failed");
 
     Ok(())
 }

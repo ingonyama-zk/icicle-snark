@@ -1,4 +1,4 @@
-use icicle_snark::{groth16_prove, groth16_witness, CacheManager};
+use icicle_snark::{groth16_prove, groth16_verify, CacheManager};
 use std::io::{self, BufRead, Write};
 
 enum ProofSystem {
@@ -6,16 +6,6 @@ enum ProofSystem {
 }
 
 enum Command {
-    FullProve {
-        system: ProofSystem,
-        input: String,
-        graph: String,
-        witness: String,
-        zkey: String,
-        proof: String,
-        public: String,
-        device: String,
-    },
     Prove {
         system: ProofSystem,
         witness: String,
@@ -24,12 +14,12 @@ enum Command {
         public: String,
         device: String,
     },
-    Witness {
+    Verify {
         system: ProofSystem,
-        input: String,
-        graph: String,
-        witness: String,
-    },
+        proof: String,
+        public: String,
+        vk: String,
+    }
 }
 
 impl Command {
@@ -90,58 +80,37 @@ impl Command {
                     device,
                 })
             }
-            "witness" => {
-                let mut input = "input.json".to_string();
-                let mut graph = "graph.bin".to_string();
-                let mut witness = "witness.wtns".to_string();
-
-                while let Some(arg) = parts.next() {
-                    match arg {
-                        "--input" => input = parts.next()?.to_string(),
-                        "--graph" => graph = parts.next()?.to_string(),
-                        "--witness" => witness = parts.next()?.to_string(),
-                        _ => Command::print_help(),
-                    }
-                }
-
-                Some(Command::Witness {
-                    system: proof_system,
-                    input,
-                    graph,
-                    witness,
-                })
-            },
-            "fullprove" => {
-                let mut input = "input.json".to_string();
-                let mut graph = "graph.bin".to_string();
-                let mut witness = "witness.wtns".to_string();
-                let mut zkey = "circuit_final.zkey".to_string();
+            "verify" => {
                 let mut proof = "proof.json".to_string();
                 let mut public = "public.json".to_string();
-                let mut device = "CUDA".to_string();
+                let mut vk = "verification_key.json".to_string();
+                let mut system = ProofSystem::Groth16;
 
                 while let Some(arg) = parts.next() {
                     match arg {
-                        "--input" => input = parts.next()?.to_string(),
-                        "--graph" => graph = parts.next()?.to_string(),
-                        "--witness" => witness = parts.next()?.to_string(),
-                        "--zkey" => zkey = parts.next()?.to_string(),
+                        "--system" => {
+                            if let Some(val) = parts.next() {
+                                system = match val.to_lowercase().as_str() {
+                                    "groth16" => ProofSystem::Groth16,
+                                    _ => {
+                                        eprintln!("Unknown proof system: {}", val);
+                                        return None;
+                                    }
+                                };
+                            }
+                        }
                         "--proof" => proof = parts.next()?.to_string(),
                         "--public" => public = parts.next()?.to_string(),
-                        "--device" => device = parts.next()?.to_string(),
+                        "--vk" => vk = parts.next()?.to_string(),
                         _ => Command::print_help(),
                     }
                 }
 
-                Some(Command::FullProve {
-                    system: proof_system,
-                    input,
-                    graph,
-                    witness,
-                    zkey,
+                Some(Command::Verify {
+                    system,
                     proof,
                     public,
-                    device,
+                    vk,
                 })
             }
             _ => None,
@@ -197,37 +166,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 println!("COMMAND_COMPLETED");
             }
-            Some(Command::Witness {
-                system,
-                input,
-                graph,
-                witness,
-            }) => {
+            Some(Command::Verify { system, proof, public, vk }) => {
                 match system {
-                    ProofSystem::Groth16 => groth16_witness(
-                        &input,
-                        &graph,
-                        &witness,
+                    ProofSystem::Groth16 => groth16_verify(
+                        &proof,
+                        &public,
+                        &vk,
                     )
                     .unwrap(),
-                }
-                println!("COMMAND_COMPLETED");
-            }
-            Some(Command::FullProve {
-                system,
-                input,
-                graph,
-                witness,
-                zkey,
-                proof,
-                public,
-                device,
-            }) => {
-                match system {
-                    ProofSystem::Groth16 => {
-                        groth16_witness(&input, &graph, &witness).unwrap();
-                        groth16_prove(&witness, &zkey, &proof, &public, &device, &mut cache_manager).unwrap();
-                    }
                 }
                 println!("COMMAND_COMPLETED");
             }

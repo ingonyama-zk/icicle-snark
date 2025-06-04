@@ -1,17 +1,20 @@
 use crate::curve::CurveCfg;
 use crate::curve::G2CurveCfg;
-use icicle_core::curve::Affine;
-use icicle_core::field::Field;
-use icicle_core::impl_field;
 use icicle_core::impl_pairing;
 use icicle_core::pairing::Pairing;
-use icicle_core::traits::{FieldConfig, FieldImpl};
-use icicle_runtime::eIcicleError;
+use icicle_runtime::{eIcicleError, memory::HostOrDeviceSlice, stream::IcicleStream};
+use icicle_core::{
+    curve::Affine,
+    field::{Field, MontgomeryConvertibleField},
+    impl_field, impl_scalar_field,
+    traits::{FieldConfig, FieldImpl, GenerateRandom},
+};
 
 pub(crate) const PAIRING_TARGET_FIELD_LIMBS: usize = 96;
 
-impl_field!(
+impl_scalar_field!(
     "bn254_pairing_target_field",
+    bn254_tf,
     PAIRING_TARGET_FIELD_LIMBS,
     PairingTargetField,
     PairingTargetFieldCfg
