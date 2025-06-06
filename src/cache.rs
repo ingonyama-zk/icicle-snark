@@ -1,15 +1,16 @@
-use std::fs::File;
-use std::io::{self, Read, Write};
-use std::path::Path;
-use std::{mem, slice};
-use std::collections::HashMap;
-use std::sync::Arc;
 use icicle_bn254::curve::ScalarField;
-use icicle_core::ntt::{initialize_domain, NTTInitDomainConfig, get_root_of_unity, release_domain};
+use icicle_core::ntt::{get_root_of_unity, initialize_domain, release_domain, NTTInitDomainConfig};
 use icicle_core::traits::{FieldImpl, MontgomeryConvertible};
 use icicle_runtime::memory::{DeviceVec, HostOrDeviceSlice, HostSlice};
 use icicle_runtime::stream::IcicleStream;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::path::Path;
+use std::{mem, slice};
+use serde::Deserialize;
+use serde::de::Deserializer;
 
 use crate::conversions::from_u8;
 use crate::file_wrapper::FileWrapper;
@@ -61,7 +62,50 @@ pub struct ZKeyCache {
     pub points_h: DeviceVec<G1>,
     pub points_c: DeviceVec<G1>,
     pub keys: DeviceVec<F>,
+    pub first_slice: DeviceVec<F>,
+    pub points_a: DeviceVec<G1>,
+    pub points_b1: DeviceVec<G1>,
+    pub points_b: DeviceVec<G2>,
+    pub points_h: DeviceVec<G1>,
+    pub points_c: DeviceVec<G1>,
+    pub keys: DeviceVec<F>,
     pub zkey: ZKey,
+}
+
+#[derive(Debug)]
+pub struct VerificationKey {
+    pub vk_alpha_1: G1,
+    pub vk_beta_2: G2,
+    pub vk_gamma_2: G2,
+    pub vk_delta_2: G2,
+    pub ic: Vec<G1>,
+    pub n_public: usize,
+}
+
+impl<'de> Deserialize<'de> for VerificationKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            vk_alpha_1: Vec<String>,
+            vk_beta_2: Vec<Vec<String>>,
+            vk_gamma_2: Vec<Vec<String>>,
+            vk_delta_2: Vec<Vec<String>>,
+            IC: Vec<Vec<String>>,
+            nPublic: usize,
+        }
+        let helper = Helper::deserialize(deserializer)?;
+        Ok(VerificationKey {
+            vk_alpha_1: crate::conversions::deserialize_g1_affine(&helper.vk_alpha_1),
+            vk_beta_2: crate::conversions::deserialize_g2_affine(&helper.vk_beta_2),
+            vk_gamma_2: crate::conversions::deserialize_g2_affine(&helper.vk_gamma_2),
+            vk_delta_2: crate::conversions::deserialize_g2_affine(&helper.vk_delta_2),
+            ic: helper.IC.iter().map(|v| crate::conversions::deserialize_g1_affine(v)).collect(),
+            n_public: helper.nPublic,
+        })
+    }
 }
 
 #[derive(Default)]
@@ -75,8 +119,9 @@ impl CacheManager {
         let mut stream = IcicleStream::create().unwrap();
 
         let (fd_zkey, sections_zkey) = FileWrapper::read_bin_file(zkey_path, "zkey", 2).unwrap();
-    
+
         let mut zkey_file = FileWrapper::new(fd_zkey).unwrap();
+
 
         let zkey = zkey_file.read_zkey_header(&sections_zkey[..]).unwrap();
         let buff_coeffs = zkey_file.read_section(&sections_zkey[..], 4).unwrap();
@@ -106,18 +151,11 @@ impl CacheManager {
                 let start = 4 + i * s_coef;
                 let buff_coef = &buff_coeffs[start..start + s_coef];
 
-                let s = u32::from_le_bytes([
-                    buff_coef[8],
-                    buff_coef[9],
-                    buff_coef[10],
-                    buff_coef[11],
-                ]) as usize;
-                let c = u32::from_le_bytes([
-                    buff_coef[4],
-                    buff_coef[5],
-                    buff_coef[6],
-                    buff_coef[7],
-                ]) as usize;
+                let s =
+                    u32::from_le_bytes([buff_coef[8], buff_coef[9], buff_coef[10], buff_coef[11]])
+                        as usize;
+                let c = u32::from_le_bytes([buff_coef[4], buff_coef[5], buff_coef[6], buff_coef[7]])
+                    as usize;
                 let m = buff_coef[0];
                 let coef = ScalarField::from_bytes_le(&buff_coef[12..12 + n8]);
 
@@ -131,7 +169,9 @@ impl CacheManager {
         let inc = F::from_hex(W[power]);
         let keys = CacheManager::pre_compute_keys(F::one(), inc, zkey.domain_size).unwrap();
         let mut d_keys = DeviceVec::device_malloc_async(zkey.domain_size, &stream).unwrap();
-        d_keys.copy_from_host_async(HostSlice::from_slice(&keys), &stream).unwrap();
+        d_keys
+            .copy_from_host_async(HostSlice::from_slice(&keys), &stream)
+            .unwrap();
 
         let points_a = zkey_file.read_section(&sections_zkey, 5).unwrap();
         let points_b1 = zkey_file.read_section(&sections_zkey, 6).unwrap();
@@ -144,7 +184,7 @@ impl CacheManager {
         let points_b = from_u8(points_b);
         let points_c = from_u8(points_c);
         let points_h = from_u8(points_h);
-        
+
         let mut d_points_a = DeviceVec::device_malloc_async(points_a.len(), &stream).unwrap();
         let mut d_points_b1 = DeviceVec::device_malloc_async(points_b1.len(), &stream).unwrap();
         let mut d_points_b = DeviceVec::device_malloc_async(points_b.len(), &stream).unwrap();
@@ -160,11 +200,15 @@ impl CacheManager {
         let first_slice = HostSlice::from_slice(&first_slice);
 
         d_points_a.copy_from_host_async(points_a, &stream).unwrap();
-        d_points_b1.copy_from_host_async(points_b1, &stream).unwrap();
+        d_points_b1
+            .copy_from_host_async(points_b1, &stream)
+            .unwrap();
         d_points_b.copy_from_host_async(points_b, &stream).unwrap();
         d_points_c.copy_from_host_async(points_c, &stream).unwrap();
         d_points_h.copy_from_host_async(points_h, &stream).unwrap();
-        d_first_slice.copy_from_host_async(first_slice, &stream).unwrap();
+        d_first_slice
+            .copy_from_host_async(first_slice, &stream)
+            .unwrap();
 
         G1::from_mont(&mut d_points_a, &stream);
         G1::from_mont(&mut d_points_b1, &stream);
@@ -189,13 +233,20 @@ impl CacheManager {
             points_c: d_points_c,
             points_h: d_points_h,
             keys: d_keys,
+            first_slice: d_first_slice,
+            points_a: d_points_a,
+            points_b1: d_points_b1,
+            points_b: d_points_b,
+            points_c: d_points_c,
+            points_h: d_points_h,
+            keys: d_keys,
         };
 
         Ok(cache_entry)
     }
     pub fn get_cache(&mut self, key: &str) -> &mut ZKeyCache {
         let cache = self.cache.get_mut(key).unwrap();
-        
+
         if !self.last_key.is_empty() && !key.eq(&self.last_key) {
             release_domain::<F>().unwrap();
         }
@@ -227,9 +278,11 @@ impl CacheManager {
             let keys = CacheManager::load_from_binary_file(&file_path)?;
             return Ok(keys);
         }
-    
+
         let mut keys = Vec::with_capacity(size);
-        unsafe { keys.set_len(size); }
+        unsafe {
+            keys.set_len(size);
+        }
         for key_ref in keys.iter_mut().take(size) {
             *key_ref = key;
             key = key * inc;
@@ -239,34 +292,31 @@ impl CacheManager {
     
         Ok(keys)
     }
-    
+
     fn save_to_binary_file(keys: &[ScalarField], file_path: &Path) -> io::Result<()> {
         let mut file = File::create(file_path)?;
-    
+
         let bytes = unsafe {
-            slice::from_raw_parts(
-                keys.as_ptr() as *const u8,
-                std::mem::size_of_val(keys),
-            )
+            slice::from_raw_parts(keys.as_ptr() as *const u8, std::mem::size_of_val(keys))
         };
-    
+
         file.write_all(bytes)?;
-    
+
         Ok(())
     }
-    
+
     fn load_from_binary_file(file_path: &Path) -> io::Result<Vec<ScalarField>> {
         let mut file = File::open(file_path)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
-    
+
         let scalar_size = mem::size_of::<ScalarField>();
         let num_scalars = buffer.len() / scalar_size;
-    
+
         let scalars: Vec<ScalarField> = unsafe {
             slice::from_raw_parts(buffer.as_ptr() as *const ScalarField, num_scalars).to_vec()
         };
-    
+
         Ok(scalars)
     }
 }

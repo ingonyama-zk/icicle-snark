@@ -1,4 +1,8 @@
-use crate::{conversions::from_affine_mont, file_wrapper::{FileWrapper, Section}, ProjectiveG1, ProjectiveG2, C1, C2, F};
+use crate::{
+    conversions::from_affine_mont,
+    file_wrapper::{FileWrapper, Section},
+    ProjectiveG1, ProjectiveG2, C1, C2, F,
+};
 use icicle_core::traits::FieldImpl;
 use std::io::{self};
 
@@ -42,7 +46,7 @@ impl ZKey {
 
     pub fn read_header_groth16(
         fd: &mut FileWrapper,
-        sections: &[Vec<Section>]
+        sections: &[Vec<Section>],
     ) -> io::Result<Self> {
         let mut zkey = ZKey::new();
 

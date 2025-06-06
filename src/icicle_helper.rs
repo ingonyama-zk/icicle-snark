@@ -1,19 +1,20 @@
+use crate::F;
 use icicle_core::{
     curve::{Affine, Curve, Projective},
-    msm::{msm, MSMConfig, MSM}, 
-    ntt::{ntt_inplace, NTTConfig, NTTDir, NTT}, traits::FieldImpl,
+    msm::{msm, MSMConfig, MSM},
+    ntt::{ntt_inplace, NTTConfig, NTTDir, NTT},
+    traits::FieldImpl,
 };
 use icicle_runtime::memory::{HostOrDeviceSlice, HostSlice};
 use icicle_runtime::{
-    memory::{DeviceSlice, DeviceVec}, stream::IcicleStream
+    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice},
+    stream::IcicleStream,
 };
-use crate::F;
 
-pub fn ntt_helper(
-    vec: &mut DeviceSlice<F>,
-    inverse: bool,
-    stream: &IcicleStream,
-) where <F as FieldImpl>::Config: NTT<F, F> {
+pub fn ntt_helper(vec: &mut DeviceSlice<F>, inverse: bool, stream: &IcicleStream)
+where
+    <F as FieldImpl>::Config: NTT<F, F>,
+{
     let dir = if inverse {
         NTTDir::kInverse
     } else {
