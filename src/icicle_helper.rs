@@ -32,14 +32,16 @@ pub fn msm_helper<C: Curve + MSM<C>>(
     scalars: &(impl HostOrDeviceSlice<C::ScalarField> + ?Sized),
     // scalars: &(impl HostOrDeviceSlice<C::ScalarField>),
     points: &(impl HostOrDeviceSlice<Affine<C>> + ?Sized),
-    stream: &IcicleStream,
+    //stream: &IcicleStream,
+    msm_config: &MSMConfig, 
 ) -> Vec<Projective<C>> 
 {
     let mut msm_result = vec![Projective::zero(); 1];
     //let mut msm_result = HostSlice::<Projective<C>>::device_malloc_async(1, stream).unwrap();
-    let mut msm_config = MSMConfig::default();
-    msm_config.stream_handle = stream.into();
-    msm_config.is_async = true;
+    // let mut msm_config = MSMConfig::default();
+    // msm_config.stream_handle = stream.into();
+    //msm_config.is_async = true;
+    //msm_config.c = 16; // SP TODO
 
     msm(scalars, points, &msm_config, HostSlice::from_mut_slice(&mut msm_result[..])).unwrap();
 
