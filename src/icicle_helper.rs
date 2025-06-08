@@ -5,9 +5,9 @@ use icicle_core::{
     ntt::{ntt_inplace, NTTConfig, NTTDir, NTT},
     traits::FieldImpl,
 };
-use icicle_runtime::memory::{HostOrDeviceSlice, HostSlice};
+
 use icicle_runtime::{
-    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice},
+    memory::{DeviceSlice, DeviceVec, HostSlice, HostOrDeviceSlice},
     stream::IcicleStream,
 };
 
