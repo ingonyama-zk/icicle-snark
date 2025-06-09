@@ -381,8 +381,10 @@ pub fn groth16_verify_helper(
     let pi_a = deserialize_g1_affine(&proof.pi_a);
     let pi_b = deserialize_g2_affine(&proof.pi_b);
     let pi_c = deserialize_g1_affine(&proof.pi_c);
-
+    
     let n_public = verification_key.n_public;
+    println!("SP: n_public: {}", n_public);
+    
     let ic = verification_key.ic.clone();
 
     let mut public_scalars = Vec::with_capacity(n_public);
@@ -405,25 +407,31 @@ pub fn groth16_verify_helper(
     let vk_alpha_1 = verification_key.vk_alpha_1.clone();
     let vk_beta_2 = verification_key.vk_beta_2.clone();
 
-    let first_thread = std::thread::spawn(move || {
-        pairing(&neg_pi_a.into(), &pi_b).unwrap()
-    });
-    let second_thread = std::thread::spawn(move || {
-        pairing(&cpub.into(), &vk_gamma_2).unwrap()
-    });
-    let third_thread = std::thread::spawn(move || {
-        pairing(&pi_c, &vk_delta_2).unwrap()
-    });
-    let fourth_thread = std::thread::spawn(move || {
-        pairing(&vk_alpha_1, &vk_beta_2).unwrap()
-    });
+    // let first_thread = std::thread::spawn(move || {
+    println!("SP: computing parings");
+    let first0 = pairing(&neg_pi_a.into(), &pi_b); //.unwrap();
+    println!("SP: first0: {:?}", first0);
+    let first = first0.unwrap();
+    println!("SP: first: {:?}", first);
+    // });
+    //let second_thread = std::thread::spawn(move || {
+    let second =    pairing(&cpub.into(), &vk_gamma_2).unwrap();
+    //});
+    //let third_thread = std::thread::spawn(move || {
+    let third =     pairing(&pi_c, &vk_delta_2).unwrap();
+    //});
+    //let fourth_thread = std::thread::spawn(move || {
+    let fourth =    pairing(&vk_alpha_1, &vk_beta_2).unwrap();
+    //});
 
-    let first = first_thread.join().unwrap();
-    let second = second_thread.join().unwrap();
-    let third = third_thread.join().unwrap();
-    let fourth = fourth_thread.join().unwrap();
+    //let first = first_thread.join().unwrap();
+    // let second = second_thread.join().unwrap();
+    // let third = third_thread.join().unwrap();
+    // let fourth = fourth_thread.join().unwrap();
 
     let result = Field::one() == first * second * third * fourth;
+    println!("SP:***********: result: {:?}", result);
+
 
     Ok(result)
 }
