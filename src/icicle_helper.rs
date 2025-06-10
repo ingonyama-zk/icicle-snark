@@ -10,7 +10,7 @@ use icicle_runtime::{
     stream::IcicleStream,
 };
 
-pub fn ntt_helper(vec: &mut DeviceSlice<F>, inverse: bool, stream: &IcicleStream)
+pub fn ntt_helper(vec: &mut DeviceSlice<F>, inverse: bool, coset_gen: Option<&F>, stream: &IcicleStream)
 where
     <F as FieldImpl>::Config: NTT<F, F>,
 {
@@ -24,6 +24,9 @@ where
     cfg1.is_async = true;
     cfg1.batch_size = 3;
     cfg1.stream_handle = stream.into();
+    if let Some(coset_gen) = coset_gen {
+        cfg1.coset_gen = *coset_gen;
+    }
 
     ntt_inplace(vec, dir, &cfg1).unwrap();
 }

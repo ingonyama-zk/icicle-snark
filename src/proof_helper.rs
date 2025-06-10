@@ -46,7 +46,6 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     let s_values = &zkey_cache.s_values;
     let c_values = &zkey_cache.c_values;
     let m_values = &zkey_cache.m_values;
-    let keys = &zkey_cache.keys;
 
     let mut second_slice = Vec::with_capacity(n_coef);
     unsafe {
@@ -114,31 +113,38 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     )
     .unwrap();
 
-    ntt_helper(&mut d_vec, true, &stream);
+    ntt_helper(&mut d_vec, true, None, &stream);
 
-    mul_scalars(
-        &d_vec[..nof_coef],
-        &keys[..],
-        &mut d_vec_copy[..nof_coef],
-        &cfg,
-    )
-    .unwrap();
-    mul_scalars(
-        &d_vec[nof_coef..nof_coef * 2],
-        &keys[..],
-        &mut d_vec_copy[nof_coef..2 * nof_coef],
-        &cfg,
-    )
-    .unwrap();
-    mul_scalars(
-        &d_vec[nof_coef * 2..],
-        &keys[..],
-        &mut d_vec_copy[2 * nof_coef..],
-        &cfg,
-    )
-    .unwrap();
+    #[cfg(feature = "precompute-keys")] {
+        let keys = &zkey_cache.keys;
 
-    ntt_helper(&mut d_vec, false, &stream);
+        mul_scalars(
+            &d_vec[..nof_coef],
+            &keys[..],
+            &mut d_vec_copy[..nof_coef],
+            &cfg,
+        )
+        .unwrap();
+        mul_scalars(
+            &d_vec[nof_coef..nof_coef * 2],
+            &keys[..],
+            &mut d_vec_copy[nof_coef..2 * nof_coef],
+            &cfg,
+        )
+        .unwrap();
+        mul_scalars(
+            &d_vec[nof_coef * 2..],
+            &keys[..],
+            &mut d_vec_copy[2 * nof_coef..],
+            &cfg,
+        )
+        .unwrap();
+    }
+
+    #[cfg(feature = "precompute-keys")]
+    ntt_helper(&mut d_vec, false, None, &stream);
+    #[cfg(not(feature = "precompute-keys"))]
+    ntt_helper(&mut d_vec, false, Some(&zkey_cache.inc), &stream);
 
     stream.synchronize().unwrap();
     stream.destroy().unwrap();

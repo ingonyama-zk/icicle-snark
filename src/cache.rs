@@ -5,12 +5,17 @@ use icicle_runtime::memory::{DeviceVec, HostOrDeviceSlice, HostSlice};
 use icicle_runtime::stream::IcicleStream;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, Read, Write};
-use std::path::Path;
-use std::{mem, slice};
 use serde::Deserialize;
 use serde::de::Deserializer;
+
+#[cfg(feature = "precompute-keys")]
+use std::fs::File;
+#[cfg(feature = "precompute-keys")]
+use std::io::{self, Read, Write};
+#[cfg(feature = "precompute-keys")]
+use std::path::Path;
+#[cfg(feature = "precompute-keys")]
+use std::{mem, slice};
 
 use crate::conversions::from_u8;
 use crate::file_wrapper::FileWrapper;
@@ -60,7 +65,9 @@ pub struct ZKeyCache {
     pub points_b: DeviceVec<G2>,
     pub points_h: DeviceVec<G1>,
     pub points_c: DeviceVec<G1>,
+    #[cfg(feature = "precompute-keys")]
     pub keys: DeviceVec<F>,
+    pub inc: F,
     pub zkey: ZKey,
 }
 
@@ -160,11 +167,8 @@ impl CacheManager {
 
         let power = zkey.power + 1;
         let inc = F::from_hex(W[power]);
+        #[cfg(feature = "precompute-keys")]
         let keys = CacheManager::pre_compute_keys(F::one(), inc, zkey.domain_size).unwrap();
-        let mut d_keys = DeviceVec::device_malloc_async(zkey.domain_size, &stream).unwrap();
-        d_keys
-            .copy_from_host_async(HostSlice::from_slice(&keys), &stream)
-            .unwrap();
 
         let points_a = zkey_file.read_section(&sections_zkey, 5).unwrap();
         let points_b1 = zkey_file.read_section(&sections_zkey, 6).unwrap();
@@ -215,6 +219,12 @@ impl CacheManager {
         stream.destroy().unwrap();
 
         let cache_entry = ZKeyCache {
+            #[cfg(feature = "precompute-keys")]
+            keys: {
+                let mut d_keys = DeviceVec::device_malloc_async(zkey.domain_size, &stream).unwrap();
+                d_keys.copy_from_host_async(HostSlice::from_slice(&keys), &stream).unwrap();
+                d_keys
+            },
             s_values,
             c_values,
             m_values,
@@ -225,7 +235,7 @@ impl CacheManager {
             points_b: d_points_b,
             points_c: d_points_c,
             points_h: d_points_h,
-            keys: d_keys,
+            inc: inc,
         };
 
         Ok(cache_entry)
@@ -251,6 +261,7 @@ impl CacheManager {
     pub fn contains(&self, key: &str) -> bool {
         self.cache.contains_key(key)
     }
+    #[cfg(feature = "precompute-keys")]
     fn pre_compute_keys(
         mut key: ScalarField,
         inc: ScalarField,
@@ -278,6 +289,7 @@ impl CacheManager {
         Ok(keys)
     }
 
+    #[cfg(feature = "precompute-keys")]
     fn save_to_binary_file(keys: &[ScalarField], file_path: &Path) -> io::Result<()> {
         let mut file = File::create(file_path)?;
 
@@ -290,6 +302,7 @@ impl CacheManager {
         Ok(())
     }
 
+    #[cfg(feature = "precompute-keys")]
     fn load_from_binary_file(file_path: &Path) -> io::Result<Vec<ScalarField>> {
         let mut file = File::open(file_path)?;
         let mut buffer = Vec::new();
