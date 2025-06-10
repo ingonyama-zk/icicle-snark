@@ -115,7 +115,7 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
 
     ntt_helper(&mut d_vec, true, None, &stream);
 
-    #[cfg(feature = "precompute-keys")] {
+    #[cfg(not(feature = "coset-gen"))] {
         let keys = &zkey_cache.keys;
 
         mul_scalars(
@@ -141,9 +141,9 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
         .unwrap();
     }
 
-    #[cfg(feature = "precompute-keys")]
+    #[cfg(not(feature = "coset-gen"))]
     ntt_helper(&mut d_vec, false, None, &stream);
-    #[cfg(not(feature = "precompute-keys"))]
+    #[cfg(feature = "coset-gen")]
     ntt_helper(&mut d_vec, false, Some(&zkey_cache.inc), &stream);
 
     stream.synchronize().unwrap();

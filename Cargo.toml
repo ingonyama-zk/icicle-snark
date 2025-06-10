@@ -17,5 +17,4 @@ clap = { version="4.5.23", features=["derive"] }
 
 [features]
 no-randomness=[]
-precompute-keys=[]
-default = ["precompute-keys"]
+coset-gen=[]
