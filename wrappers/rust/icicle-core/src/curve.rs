@@ -139,16 +139,10 @@ impl<C: Curve> From<Projective<C>> for Affine<C> {
 
 impl<C: Curve> MontgomeryConvertible for Affine<C> {
     fn to_mont(values: &mut (impl HostOrDeviceSlice<Self> + ?Sized), stream: &IcicleStream) -> eIcicleError {
-        if !values.is_on_active_device() {
-            panic!("values not allocated on an inactive device");
-        }
         C::convert_affine_montgomery(unsafe { values.as_mut_ptr() }, values.len(), true, stream)
     }
 
     fn from_mont(values: &mut (impl HostOrDeviceSlice<Self> + ?Sized), stream: &IcicleStream) -> eIcicleError {
-        if !values.is_on_active_device() {
-            panic!("values not allocated on an inactive device");
-        }
         C::convert_affine_montgomery(unsafe { values.as_mut_ptr() }, values.len(), false, stream)
     }
 }

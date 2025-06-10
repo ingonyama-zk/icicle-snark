@@ -6,11 +6,11 @@ use icicle_core::{
     traits::FieldImpl,
 };
 use icicle_runtime::{
-    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice},
+    memory::HostSlice,
     stream::IcicleStream,
 };
 
-pub fn ntt_helper(vec: &mut DeviceSlice<F>, inverse: bool, stream: &IcicleStream)
+pub fn ntt_helper(vec: &mut HostSlice<F>, inverse: bool, stream: &IcicleStream)
 where
     <F as FieldImpl>::Config: NTT<F, F>,
 {
@@ -29,16 +29,20 @@ where
 }
 
 pub fn msm_helper<C: Curve + MSM<C>>(
-    scalars: &(impl HostOrDeviceSlice<C::ScalarField> + ?Sized),
-    points: &(impl HostOrDeviceSlice<Affine<C>> + ?Sized),
+    scalars: &[C::ScalarField],
+    points: &[Affine<C>],
     stream: &IcicleStream,
-) -> DeviceVec<Projective<C>> {
-    let mut msm_result = DeviceVec::<Projective<C>>::device_malloc_async(1, stream).unwrap();
+) -> Projective<C> {
+    let mut msm_result = vec![Projective::<C>::zero()];
+    let msm_result_host = HostSlice::from_mut_slice(&mut msm_result);
     let mut msm_config = MSMConfig::default();
     msm_config.stream_handle = stream.into();
     msm_config.is_async = true;
 
-    msm(scalars, points, &msm_config, &mut msm_result[..]).unwrap();
+    let h_scalars = HostSlice::from_slice(scalars);
+    let h_points = HostSlice::from_slice(points);
 
-    msm_result
+    msm(&h_scalars[..], &h_points[..], &msm_config, &mut msm_result_host[..]).unwrap();
+
+    msm_result[0]
 }

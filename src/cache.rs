@@ -1,7 +1,7 @@
 use icicle_bn254::curve::ScalarField;
 use icicle_core::ntt::{get_root_of_unity, initialize_domain, release_domain, NTTInitDomainConfig};
 use icicle_core::traits::{FieldImpl, MontgomeryConvertible};
-use icicle_runtime::memory::{DeviceVec, HostOrDeviceSlice, HostSlice};
+use icicle_runtime::memory::HostSlice;
 use icicle_runtime::stream::IcicleStream;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use std::collections::HashMap;
@@ -9,9 +9,6 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::{mem, slice};
-use serde::Deserialize;
-use serde::de::Deserializer;
-
 use crate::conversions::from_u8;
 use crate::file_wrapper::FileWrapper;
 use crate::zkey::ZKey;
@@ -54,51 +51,16 @@ pub struct ZKeyCache {
     pub s_values: Vec<usize>,
     pub c_values: Vec<usize>,
     pub m_values: Vec<usize>,
-    pub first_slice: DeviceVec<F>,
-    pub points_a: DeviceVec<G1>,
-    pub points_b1: DeviceVec<G1>,
-    pub points_b: DeviceVec<G2>,
-    pub points_h: DeviceVec<G1>,
-    pub points_c: DeviceVec<G1>,
-    pub keys: DeviceVec<F>,
+    pub first_slice: Vec<F>,
+    pub points_a: Vec<G1>,
+    pub points_b1: Vec<G1>,
+    pub points_b: Vec<G2>,
+    pub points_h: Vec<G1>,
+    pub points_c: Vec<G1>,
+    pub keys: Vec<F>,
     pub zkey: ZKey,
 }
 
-#[derive(Debug)]
-pub struct VerificationKey {
-    pub vk_alpha_1: G1,
-    pub vk_beta_2: G2,
-    pub vk_gamma_2: G2,
-    pub vk_delta_2: G2,
-    pub ic: Vec<G1>,
-    pub n_public: usize,
-}
-
-impl<'de> Deserialize<'de> for VerificationKey {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Helper {
-            vk_alpha_1: Vec<String>,
-            vk_beta_2: Vec<Vec<String>>,
-            vk_gamma_2: Vec<Vec<String>>,
-            vk_delta_2: Vec<Vec<String>>,
-            IC: Vec<Vec<String>>,
-            nPublic: usize,
-        }
-        let helper = Helper::deserialize(deserializer)?;
-        Ok(VerificationKey {
-            vk_alpha_1: crate::conversions::deserialize_g1_affine(&helper.vk_alpha_1),
-            vk_beta_2: crate::conversions::deserialize_g2_affine(&helper.vk_beta_2),
-            vk_gamma_2: crate::conversions::deserialize_g2_affine(&helper.vk_gamma_2),
-            vk_delta_2: crate::conversions::deserialize_g2_affine(&helper.vk_delta_2),
-            ic: helper.IC.iter().map(|v| crate::conversions::deserialize_g1_affine(v)).collect(),
-            n_public: helper.nPublic,
-        })
-    }
-}
 
 #[derive(Default)]
 pub struct CacheManager {
@@ -161,10 +123,6 @@ impl CacheManager {
         let power = zkey.power + 1;
         let inc = F::from_hex(W[power]);
         let keys = CacheManager::pre_compute_keys(F::one(), inc, zkey.domain_size).unwrap();
-        let mut d_keys = DeviceVec::device_malloc_async(zkey.domain_size, &stream).unwrap();
-        d_keys
-            .copy_from_host_async(HostSlice::from_slice(&keys), &stream)
-            .unwrap();
 
         let points_a = zkey_file.read_section(&sections_zkey, 5).unwrap();
         let points_b1 = zkey_file.read_section(&sections_zkey, 6).unwrap();
@@ -172,44 +130,26 @@ impl CacheManager {
         let points_c = zkey_file.read_section(&sections_zkey, 8).unwrap();
         let points_h = zkey_file.read_section(&sections_zkey, 9).unwrap();
 
-        let points_a = from_u8(points_a);
-        let points_b1 = from_u8(points_b1);
-        let points_b = from_u8(points_b);
-        let points_c = from_u8(points_c);
-        let points_h = from_u8(points_h);
+        let mut points_a = from_u8(points_a).to_vec();
+        let mut points_b1 = from_u8(points_b1).to_vec();
+        let mut points_b = from_u8(points_b).to_vec();
+        let mut points_c = from_u8(points_c).to_vec();
+        let mut points_h = from_u8(points_h).to_vec();
 
-        let mut d_points_a = DeviceVec::device_malloc_async(points_a.len(), &stream).unwrap();
-        let mut d_points_b1 = DeviceVec::device_malloc_async(points_b1.len(), &stream).unwrap();
-        let mut d_points_b = DeviceVec::device_malloc_async(points_b.len(), &stream).unwrap();
-        let mut d_points_c = DeviceVec::device_malloc_async(points_c.len(), &stream).unwrap();
-        let mut d_points_h = DeviceVec::device_malloc_async(points_h.len(), &stream).unwrap();
-        let mut d_first_slice = DeviceVec::device_malloc_async(first_slice.len(), &stream).unwrap();
+        let h_points_a = HostSlice::from_mut_slice(&mut points_a);
+        let h_points_b1 = HostSlice::from_mut_slice(&mut points_b1);
+        let h_points_b = HostSlice::from_mut_slice(&mut points_b);
+        let h_points_c = HostSlice::from_mut_slice(&mut points_c);
+        let h_points_h = HostSlice::from_mut_slice(&mut points_h);
+        let h_first_slice = HostSlice::from_mut_slice(&mut first_slice);
 
-        let points_a = HostSlice::from_slice(points_a);
-        let points_b1 = HostSlice::from_slice(points_b1);
-        let points_b = HostSlice::from_slice(points_b);
-        let points_c = HostSlice::from_slice(points_c);
-        let points_h = HostSlice::from_slice(points_h);
-        let first_slice = HostSlice::from_slice(&first_slice);
+        G1::from_mont(h_points_a, &stream);
+        G1::from_mont(h_points_b1, &stream);
+        G2::from_mont(h_points_b, &stream);
+        G1::from_mont(h_points_c, &stream);
+        G1::from_mont(h_points_h, &stream);
 
-        d_points_a.copy_from_host_async(points_a, &stream).unwrap();
-        d_points_b1
-            .copy_from_host_async(points_b1, &stream)
-            .unwrap();
-        d_points_b.copy_from_host_async(points_b, &stream).unwrap();
-        d_points_c.copy_from_host_async(points_c, &stream).unwrap();
-        d_points_h.copy_from_host_async(points_h, &stream).unwrap();
-        d_first_slice
-            .copy_from_host_async(first_slice, &stream)
-            .unwrap();
-
-        G1::from_mont(&mut d_points_a, &stream);
-        G1::from_mont(&mut d_points_b1, &stream);
-        G2::from_mont(&mut d_points_b, &stream);
-        G1::from_mont(&mut d_points_c, &stream);
-        G1::from_mont(&mut d_points_h, &stream);
-
-        ScalarField::from_mont(&mut d_first_slice, &stream);
+        ScalarField::from_mont(h_first_slice, &stream);
 
         stream.synchronize().unwrap();
         stream.destroy().unwrap();
@@ -219,13 +159,13 @@ impl CacheManager {
             c_values,
             m_values,
             zkey,
-            first_slice: d_first_slice,
-            points_a: d_points_a,
-            points_b1: d_points_b1,
-            points_b: d_points_b,
-            points_c: d_points_c,
-            points_h: d_points_h,
-            keys: d_keys,
+            first_slice,
+            points_a: points_a.to_vec(),
+            points_b1: points_b1.to_vec(),
+            points_b: points_b.to_vec(),
+            points_c: points_c.to_vec(),
+            points_h: points_h.to_vec(),
+            keys: keys.to_vec(),
         };
 
         Ok(cache_entry)

@@ -1,4 +1,4 @@
-use icicle_snark::{groth16_prove, groth16_verify, CacheManager};
+use icicle_snark::{groth16_prove, CacheManager};
 use std::io::{self, BufRead, Write};
 
 enum ProofSystem {
@@ -10,16 +10,8 @@ enum Command {
         system: ProofSystem,
         witness: String,
         zkey: String,
-        proof: String,
-        public: String,
         device: String,
     },
-    Verify {
-        system: ProofSystem,
-        proof: String,
-        public: String,
-        vk: String,
-    }
 }
 
 impl Command {
@@ -45,8 +37,6 @@ impl Command {
             "prove" => {
                 let mut witness = "witness.wtns".to_string();
                 let mut zkey = "circuit_final.zkey".to_string();
-                let mut proof = "proof.json".to_string();
-                let mut public = "public.json".to_string();
                 let mut device = "CUDA".to_string();
 
                 while let Some(arg) = parts.next() {
@@ -64,8 +54,6 @@ impl Command {
                         }
                         "--witness" => witness = parts.next()?.to_string(),
                         "--zkey" => zkey = parts.next()?.to_string(),
-                        "--proof" => proof = parts.next()?.to_string(),
-                        "--public" => public = parts.next()?.to_string(),
                         "--device" => device = parts.next()?.to_string(),
                         _ => Command::print_help(),
                     }
@@ -75,42 +63,7 @@ impl Command {
                     system: proof_system,
                     witness,
                     zkey,
-                    proof,
-                    public,
                     device,
-                })
-            }
-            "verify" => {
-                let mut proof = "proof.json".to_string();
-                let mut public = "public.json".to_string();
-                let mut vk = "verification_key.json".to_string();
-                let mut system = ProofSystem::Groth16;
-
-                while let Some(arg) = parts.next() {
-                    match arg {
-                        "--system" => {
-                            if let Some(val) = parts.next() {
-                                system = match val.to_lowercase().as_str() {
-                                    "groth16" => ProofSystem::Groth16,
-                                    _ => {
-                                        eprintln!("Unknown proof system: {}", val);
-                                        return None;
-                                    }
-                                };
-                            }
-                        }
-                        "--proof" => proof = parts.next()?.to_string(),
-                        "--public" => public = parts.next()?.to_string(),
-                        "--vk" => vk = parts.next()?.to_string(),
-                        _ => Command::print_help(),
-                    }
-                }
-
-                Some(Command::Verify {
-                    system,
-                    proof,
-                    public,
-                    vk,
                 })
             }
             _ => None,
@@ -149,29 +102,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 system,
                 witness,
                 zkey,
-                proof,
-                public,
                 device,
             }) => {
                 match system {
                     ProofSystem::Groth16 => groth16_prove(
                         &witness,
                         &zkey,
-                        &proof,
-                        &public,
                         &device,
                         &mut cache_manager,
-                    )
-                    .unwrap(),
-                }
-                println!("COMMAND_COMPLETED");
-            }
-            Some(Command::Verify { system, proof, public, vk }) => {
-                match system {
-                    ProofSystem::Groth16 => groth16_verify(
-                        &proof,
-                        &public,
-                        &vk,
                     )
                     .unwrap(),
                 }
