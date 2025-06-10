@@ -7,8 +7,9 @@ use icicle_core::{
 };
 
 use icicle_runtime::{
-    memory::{DeviceSlice, DeviceVec, HostSlice, HostOrDeviceSlice},
+    memory::{DeviceSlice, HostSlice, HostOrDeviceSlice}
 };
+
 use std::time::Instant;
 
 pub fn ntt_helper(vec: &mut DeviceSlice<F>, inverse: bool, cfg: &NTTConfig<F>)
@@ -34,9 +35,9 @@ pub fn msm_helper<C: Curve + MSM<C>>(
 ) -> Projective<C>
 {
     let mut msm_result = vec![Projective::zero(); 1];
-
     let timer = Instant::now();
     msm(scalars, points, &msm_config, HostSlice::from_mut_slice(&mut msm_result[..])).unwrap();
     println!("{:?} MSM took:\t\t{:?}", msm_name, timer.elapsed());
+
     msm_result[0]
 }

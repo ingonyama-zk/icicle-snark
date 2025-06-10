@@ -133,42 +133,6 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     d_vec
 }
 
-// Function for the first thread - sums array elements
-fn afun(arr: Vec<i32>) -> i32 {
-    println!("Thread A processing: {:?}", arr);
-    arr.iter().sum()
-}
-
-fn count_similar_scalars(scalars: &[F]) {
-    use std::collections::HashMap;
-    let mut scalar_counts: HashMap<String, usize> = HashMap::new();
-    for scalar in scalars {
-        let scalar_str = format!("{:?}", scalar);
-        *scalar_counts.entry(scalar_str).or_insert(0) += 1;
-    }
-    
-    // Count how many scalars appear 1, 2, 3, etc. times
-    let mut frequency_distribution: HashMap<usize, usize> = HashMap::new();
-    for count in scalar_counts.values() {
-        *frequency_distribution.entry(*count).or_insert(0) += 1;
-    }
-    
-    println!("SP: Scalar frequency distribution:");
-    let mut frequencies: Vec<_> = frequency_distribution.keys().collect();
-    frequencies.sort();
-    for freq in frequencies {
-        let count = frequency_distribution[freq];
-        println!("SP: {} scalars appear {} times", count, freq);
-    }
-
-    println!("\nSP: Detailed scalar values and counts:");
-    let mut sorted_scalars: Vec<_> = scalar_counts.iter().collect();
-    sorted_scalars.sort_by(|a, b| b.1.cmp(a.1)); // Sort by count in descending order
-    for (scalar, count) in sorted_scalars {
-        println!("SP: Value: {} appears {} times", scalar, count);
-    }
-}
-
 pub fn groth16_commitments(
     scalars: &[F],
     zkey_cache: &ZKeyCache,
@@ -343,11 +307,8 @@ pub fn groth16_verify_helper(
     let vk_beta_2 = verification_key.vk_beta_2.clone();
 
     // let first_thread = std::thread::spawn(move || {
-    println!("SP: computing parings");
     let first0 = pairing(&neg_pi_a.into(), &pi_b); //.unwrap();
-    println!("SP: first0: {:?}", first0);
     let first = first0.unwrap();
-    println!("SP: first: {:?}", first);
     // });
     //let second_thread = std::thread::spawn(move || {
     let second =    pairing(&cpub.into(), &vk_gamma_2).unwrap();
@@ -365,8 +326,6 @@ pub fn groth16_verify_helper(
     // let fourth = fourth_thread.join().unwrap();
 
     let result = Field::one() == first * second * third * fourth;
-    println!("SP:***********: result: {:?}", result);
-
 
     Ok(result)
 }
