@@ -40,94 +40,80 @@ fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<
     cfg.stream_handle = *stream;
 
     // ------------------------------------------------------------
-    let buff_coeffs = zkey_cache.file.read_section(&zkey_cache.sections[..], 4).unwrap();
-    let s_coef = 4 * 3 + zkey_cache.header.n8r;
-    let n_coef = (buff_coeffs.len() - 4) / s_coef;
+    let calc_wire_vals = || {
+        let buff_coeffs = zkey_cache.file.read_section(&zkey_cache.sections[..], 4).unwrap();
+        let s_coef = 4 * 3 + zkey_cache.header.n8r;
+        let n_coef = (buff_coeffs.len() - 4) / s_coef;
 
-    let mut first_slice = Vec::with_capacity(n_coef);
-    let mut s_values = Vec::with_capacity(n_coef);
-    let mut c_values = Vec::with_capacity(n_coef);
-    let mut m_values = Vec::with_capacity(n_coef);
+        let mut first_slice = Vec::with_capacity(n_coef);
+        let mut second_slice = Vec::with_capacity(n_coef);
+        let mut c_values = Vec::with_capacity(n_coef);
+        let mut m_values = Vec::with_capacity(n_coef);
 
-    unsafe {
-        first_slice.set_len(n_coef);
-        s_values.set_len(n_coef);
-        c_values.set_len(n_coef);
-        m_values.set_len(n_coef);
-    }
-    let n8 = 32;
+        unsafe {
+            first_slice.set_len(n_coef);
+            second_slice.set_len(n_coef);
+            c_values.set_len(n_coef);
+            m_values.set_len(n_coef);
+        }
+        
+        let n8 = 32;
+        second_slice
+            .par_iter_mut()
+            .zip(c_values.par_iter_mut())
+            .zip(m_values.par_iter_mut())
+            .zip(first_slice.par_iter_mut())
+            .enumerate()
+            .for_each(|(i, (((witness_val, c_val), m_val), coef_val))| {
+                let start = 4 + i * s_coef;
+                let buff_coef = &buff_coeffs[start..start + s_coef];
 
-    s_values
-        .par_iter_mut()
-        .zip(c_values.par_iter_mut())
-        .zip(m_values.par_iter_mut())
-        .zip(first_slice.par_iter_mut())
-        .enumerate()
-        .for_each(|(i, (((s_val, c_val), m_val), coef_val))| {
-            let start = 4 + i * s_coef;
-            let buff_coef = &buff_coeffs[start..start + s_coef];
-
-            let s =
-                u32::from_le_bytes([buff_coef[8], buff_coef[9], buff_coef[10], buff_coef[11]])
+                let s =
+                    u32::from_le_bytes([buff_coef[8], buff_coef[9], buff_coef[10], buff_coef[11]])
+                        as usize;
+                let c = u32::from_le_bytes([buff_coef[4], buff_coef[5], buff_coef[6], buff_coef[7]])
                     as usize;
-            let c = u32::from_le_bytes([buff_coef[4], buff_coef[5], buff_coef[6], buff_coef[7]])
-                as usize;
-            let m = buff_coef[0];
-            let coef = ScalarField::from_bytes_le(&buff_coef[12..12 + n8]);
+                let m = buff_coef[0];
+                let coef = ScalarField::from_bytes_le(&buff_coef[12..12 + n8]);
 
-            *s_val = s;
-            *c_val = c;
-            *m_val = m as usize;
-            *coef_val = coef;
-        });
+                *witness_val = witness[s];
+                *c_val = c;
+                *m_val = m as usize;
+                *coef_val = coef;
+            });
 
-    let mut d_first_slice = DeviceVec::device_malloc_async(first_slice.len(), &stream).unwrap();
-    let first_slice = HostSlice::from_slice(&first_slice);
-    d_first_slice
-        .copy_from_host_async(first_slice, &stream)
-        .unwrap();
+        let mut d_first_slice = DeviceVec::device_malloc_async(first_slice.len(), &stream).unwrap();
+        d_first_slice
+            .copy_from_host_async(HostSlice::from_slice(&first_slice), &stream)
+            .unwrap();
 
-    ScalarField::from_mont(&mut d_first_slice, &stream);
+        ScalarField::from_mont(&mut d_first_slice, &stream);
+        
+        let mut d_second_slice = DeviceVec::device_malloc_async(n_coef, &stream).unwrap();
+        d_second_slice
+            .copy_from_host_async(HostSlice::from_slice(&second_slice), &stream)
+            .unwrap();
+        ScalarField::from_mont(&mut d_second_slice, &stream);
+        
+        let mut res = Vec::with_capacity(n_coef);
+        unsafe {
+            res.set_len(n_coef);
+        }
+        let res_slice = HostSlice::from_mut_slice(&mut res);
+        mul_scalars(&d_first_slice[..], &d_second_slice, res_slice, &cfg).unwrap();
+        
+        stream.synchronize().unwrap();
 
-    stream.synchronize().unwrap();
-    stream.destroy().unwrap();
-    // ------------------------------------------------------------
-
-    let mut second_slice = Vec::with_capacity(n_coef);
-    unsafe {
-        second_slice.set_len(n_coef);
-    }
-
-    second_slice
-        .par_iter_mut()
-        .enumerate()
-        .for_each(|(i, slice_elem)| {
-            let s = s_values[i];
-            *slice_elem = witness[s];
-        });
-
-    let second_slice = HostSlice::from_mut_slice(&mut second_slice);
-
-    let mut res = Vec::with_capacity(n_coef);
-    unsafe {
-        res.set_len(n_coef);
-    }
-    let res = HostSlice::from_mut_slice(&mut res);
-
-    let mut d_second_slice = DeviceVec::device_malloc_async(n_coef, &stream).unwrap();
-    d_second_slice
-        .copy_from_host_async(second_slice, &stream)
-        .unwrap();
-    ScalarField::from_mont(&mut d_second_slice, &stream);
-    mul_scalars(&d_first_slice[..], &d_second_slice, res, &cfg).unwrap();
-
-    stream.synchronize().unwrap();
+        (res, c_values, m_values)
+    };
+    
+    let (res, c_values, m_values) = calc_wire_vals();
 
     let nof_coef = zkey_cache.header.domain_size;
     let zero_scalar = ScalarField::zero();
     let mut out_buff_b_a = vec![ScalarField::zero(); nof_coef * 2];
 
-    for i in 0..n_coef {
+    for i in 0..res.len() {
         let c = c_values[i];
         let m = m_values[i];
         let idx = c + m * nof_coef;
