@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde::de::Deserializer;
 
 use crate::conversions::from_u8;
-use crate::file_wrapper::FileWrapper;
+use crate::file_wrapper::{FileWrapper, Section};
 use crate::zkey::ZKeyHeader;
 use crate::{F, G1, G2};
 
@@ -56,12 +56,9 @@ pub struct ZKeyCache {
     pub c_values: Vec<usize>,
     pub m_values: Vec<usize>,
     pub first_slice: DeviceVec<F>,
-    pub points_a: DeviceVec<G1>,
-    pub points_b1: DeviceVec<G1>,
-    pub points_b: DeviceVec<G2>,
-    pub points_h: DeviceVec<G1>,
-    pub points_c: DeviceVec<G1>,
-    pub zkey: ZKeyHeader,
+    pub file: FileWrapper,
+    pub sections: Vec<Vec<Section>>,
+    pub header: ZKeyHeader,
     pub coset_gen: F,
 }
 
@@ -136,14 +133,14 @@ impl CacheManager {
     pub fn compute(&mut self, zkey_path: &str) -> Result<ZKeyCache, Box<dyn std::error::Error>> {
         let mut stream = IcicleStream::create().unwrap();
 
-        let (fd_zkey, sections_zkey) = FileWrapper::read_bin_file(zkey_path, "zkey", 2).unwrap();
+        let (fd_zkey, sections) = FileWrapper::read_bin_file(zkey_path, "zkey", 2).unwrap();
 
-        let mut zkey_file = FileWrapper::new(fd_zkey).unwrap();
+        let mut file = FileWrapper::new(fd_zkey).unwrap();
 
 
-        let zkey = zkey_file.read_zkey_header(&sections_zkey[..]).unwrap();
-        let buff_coeffs = zkey_file.read_section(&sections_zkey[..], 4).unwrap();
-        let s_coef = 4 * 3 + zkey.n8r;
+        let header = file.read_zkey_header(&sections[..]).unwrap();
+        let buff_coeffs = file.read_section(&sections[..], 4).unwrap();
+        let s_coef = 4 * 3 + header.n8r;
         let n_coef = (buff_coeffs.len() - 4) / s_coef;
 
         let mut first_slice = Vec::with_capacity(n_coef);
@@ -183,67 +180,27 @@ impl CacheManager {
                 *coef_val = coef;
             });
 
-        let points_a = zkey_file.read_section(&sections_zkey, 5).unwrap();
-        let points_b1 = zkey_file.read_section(&sections_zkey, 6).unwrap();
-        let points_b = zkey_file.read_section(&sections_zkey, 7).unwrap();
-        let points_c = zkey_file.read_section(&sections_zkey, 8).unwrap();
-        let points_h = zkey_file.read_section(&sections_zkey, 9).unwrap();
-
-        let points_a = from_u8(points_a);
-        let points_b1 = from_u8(points_b1);
-        let points_b = from_u8(points_b);
-        let points_c = from_u8(points_c);
-        let points_h = from_u8(points_h);
-
-        let mut d_points_a = DeviceVec::device_malloc_async(points_a.len(), &stream).unwrap();
-        let mut d_points_b1 = DeviceVec::device_malloc_async(points_b1.len(), &stream).unwrap();
-        let mut d_points_b = DeviceVec::device_malloc_async(points_b.len(), &stream).unwrap();
-        let mut d_points_c = DeviceVec::device_malloc_async(points_c.len(), &stream).unwrap();
-        let mut d_points_h = DeviceVec::device_malloc_async(points_h.len(), &stream).unwrap();
         let mut d_first_slice = DeviceVec::device_malloc_async(first_slice.len(), &stream).unwrap();
-
-        let points_a = HostSlice::from_slice(points_a);
-        let points_b1 = HostSlice::from_slice(points_b1);
-        let points_b = HostSlice::from_slice(points_b);
-        let points_c = HostSlice::from_slice(points_c);
-        let points_h = HostSlice::from_slice(points_h);
         let first_slice = HostSlice::from_slice(&first_slice);
-
-        d_points_a.copy_from_host_async(points_a, &stream).unwrap();
-        d_points_b1
-            .copy_from_host_async(points_b1, &stream)
-            .unwrap();
-        d_points_b.copy_from_host_async(points_b, &stream).unwrap();
-        d_points_c.copy_from_host_async(points_c, &stream).unwrap();
-        d_points_h.copy_from_host_async(points_h, &stream).unwrap();
         d_first_slice
             .copy_from_host_async(first_slice, &stream)
             .unwrap();
-
-        G1::from_mont(&mut d_points_a, &stream);
-        G1::from_mont(&mut d_points_b1, &stream);
-        G2::from_mont(&mut d_points_b, &stream);
-        G1::from_mont(&mut d_points_c, &stream);
-        G1::from_mont(&mut d_points_h, &stream);
 
         ScalarField::from_mont(&mut d_first_slice, &stream);
 
         stream.synchronize().unwrap();
         stream.destroy().unwrap();
 
-        let coset_gen = F::from_hex(W[zkey.power + 1]);
+        let coset_gen = F::from_hex(W[header.power + 1]);
 
         let cache_entry = ZKeyCache {
             s_values,
             c_values,
             m_values,
-            zkey,
+            header,
             first_slice: d_first_slice,
-            points_a: d_points_a,
-            points_b1: d_points_b1,
-            points_b: d_points_b,
-            points_c: d_points_c,
-            points_h: d_points_h,
+            file,
+            sections,
             coset_gen,
         };
 

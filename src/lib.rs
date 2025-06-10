@@ -49,8 +49,7 @@ pub fn groth16_prove(
     if update_domain {
         release_domain::<F>().unwrap();
     }
-    let domain: F = get_root_of_unity(zkey_cache.points_a.len() as u64);
-    // let domain: F = get_root_of_unity(zkey_cache.header.n_vars as u64);
+    let domain: F = get_root_of_unity(zkey_cache.header.n_vars as u64);
     let cfg = NTTInitDomainConfig::default();
     initialize_domain(domain, &cfg).unwrap();
 

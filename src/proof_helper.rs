@@ -2,7 +2,8 @@ use std::thread;
 use std::time::Instant;
 use icicle_bn254::curve:: G2Affine;
 use crate::{
-    cache::{VerificationKey, ZKeyCache}, conversions::{deserialize_g1_affine, deserialize_g2_affine, from_u8, serialize_g1_affine, serialize_g2_affine}, file_wrapper::FileWrapper, icicle_helper::{msm_helper, ntt_helper}, ProjectiveG1, ProjectiveG2, F
+    cache::{VerificationKey, ZKeyCache}, conversions::{deserialize_g1_affine, deserialize_g2_affine, from_u8, serialize_g1_affine, serialize_g2_affine}, file_wrapper::FileWrapper, icicle_helper::{msm_helper, ntt_helper}, ProjectiveG1, ProjectiveG2,
+    F, G1, G2
 };
 use icicle_bn254::curve::{G1Projective, ScalarField};
 use icicle_core::{
@@ -39,7 +40,7 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     cfg.stream_handle = *stream;
 
     let n_coef = zkey_cache.c_values.len();
-    let nof_coef = zkey_cache.zkey.domain_size;
+    let nof_coef = zkey_cache.header.domain_size;
 
     let mut d_second_slice = DeviceVec::device_malloc_async(n_coef, &stream).unwrap();
     let mut d_vec = DeviceVec::device_malloc_async(nof_coef * 3, &stream).unwrap();
@@ -146,7 +147,7 @@ pub fn groth16_commitments(
     let mut msm_config = MSMConfig::default();
     msm_config.is_async = false;
     msm_config.c = 14;
-    msm_config.are_bases_montgomery_form = true;
+    // msm_config.are_bases_montgomery_form = true;
     
     let a: ProjectiveG1;
     let b1: ProjectiveG1;
@@ -154,31 +155,63 @@ pub fn groth16_commitments(
     let c: ProjectiveG1;
     
     {
-        // let points_a = from_u8(zkey_file.read_section(sections_zkey, 5).unwrap());
-        let points_a = &zkey_cache.points_a;
+        let mut stream = IcicleStream::create().unwrap();
+        let points_a_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 5).unwrap());
+        let points_a = HostSlice::from_slice(&points_a_raw);
+        let mut d_points_a = DeviceVec::device_malloc_async(points_a.len(), &stream).unwrap();
+        d_points_a.copy_from_host_async(points_a, &stream).unwrap();
+        G1::from_mont(&mut d_points_a, &stream);
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+        
+        // let points_a = &zkey_cache.points_a;
         println!("MSM a input sizes - scalars: {}, points: {}", host_scalars.len(), points_a.len());
-        a = msm_helper(&host_scalars[..], points_a, &msm_config, "a");
+        a = msm_helper(&host_scalars[..], &d_points_a, &msm_config, "a");
     }
     
     {
-        // let points_b1 = from_u8(zkey_file.read_section(sections_zkey, 6).unwrap());
-        let points_b1 = &zkey_cache.points_b1;
+        let mut stream = IcicleStream::create().unwrap();
+        let points_b1_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 6).unwrap());
+        let points_b1 = HostSlice::from_slice(&points_b1_raw);
+        let mut d_points_b1 = DeviceVec::device_malloc_async(points_b1.len(), &stream).unwrap();
+        d_points_b1.copy_from_host_async(points_b1, &stream).unwrap();
+        G1::from_mont(&mut d_points_b1, &stream);
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+        
+        // let points_b1 = &zkey_cache.points_b1;
         println!("MSM b1 input sizes - scalars: {}, points: {}", host_scalars.len(), points_b1.len());
-        b1 = msm_helper(&host_scalars[..], points_b1, &msm_config, "b1");
+        b1 = msm_helper(&host_scalars[..], &d_points_b1, &msm_config, "b1");
     }
     
     {
-        // let points_b = from_u8(zkey_file.read_section(sections_zkey, 7).unwrap());
-        let points_b = &zkey_cache.points_b;
+        let mut stream = IcicleStream::create().unwrap();
+        let points_b_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 7).unwrap());
+        let points_b = HostSlice::from_slice(&points_b_raw);
+        let mut d_points_b = DeviceVec::device_malloc_async(points_b.len(), &stream).unwrap();
+        d_points_b.copy_from_host_async(points_b, &stream).unwrap();
+        G2::from_mont(&mut d_points_b, &stream);
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+        
+        // let points_b = &zkey_cache.points_b;
         println!("MSM b input sizes - scalars: {}, points: {}", host_scalars.len(), points_b.len());
-        b = msm_helper(&host_scalars[..], points_b, &msm_config, "b");
+        b = msm_helper(&host_scalars[..], &d_points_b, &msm_config, "b");
     }
     
     {
-        // let points_c = from_u8(zkey_file.read_section(sections_zkey, 8).unwrap());
-        let points_c = &zkey_cache.points_c;
-        println!("MSM c input sizes - scalars: {}, points: {}", zkey_cache.zkey.n_public + 1, points_c.len());
-        c = msm_helper(&host_scalars[zkey_cache.zkey.n_public + 1..], points_c, &msm_config, "c");
+        let mut stream = IcicleStream::create().unwrap();
+        let points_c_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 8).unwrap());
+        let points_c = HostSlice::from_slice(&points_c_raw);
+        let mut d_points_c = DeviceVec::device_malloc_async(points_c.len(), &stream).unwrap();
+        d_points_c.copy_from_host_async(points_c, &stream).unwrap();
+        G1::from_mont(&mut d_points_c, &stream);
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+        
+        // let points_c = &zkey_cache.points_c;
+        println!("MSM c input sizes - scalars: {}, points: {}", zkey_cache.header.n_public + 1, points_c.len());
+        c = msm_helper(&host_scalars[zkey_cache.header.n_public + 1..], &d_points_c, &msm_config, "c");
     }
 
     (a, b1, b, c)
@@ -194,7 +227,7 @@ pub fn groth16_prove_helper(
 
     let wtns = wtns_file.read_wtns_header(&sections_wtns[..]).unwrap();
 
-    let zkey = &zkey_cache.zkey;
+    let zkey = &zkey_cache.header;
 
     if !F::eq(&zkey.r, &wtns.q) {
         panic!("Curve of the witness does not match the curve of the proving key");
@@ -218,14 +251,23 @@ pub fn groth16_prove_helper(
     // END CPU
     
     // TODO: move this to a separate thread operating on METAL
-    let num_coef = zkey_cache.zkey.domain_size;
+    let num_coef = zkey_cache.header.domain_size;
     let mut msm_config = MSMConfig::default();
     msm_config.is_async = false;
     msm_config.c = 14;
-    msm_config.are_bases_montgomery_form = true;
-    let points_h = &zkey_cache.points_h;
+    // msm_config.are_bases_montgomery_form = true;
+    let mut stream = IcicleStream::create().unwrap();
+    let points_h_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 9).unwrap());
+    let points_h = HostSlice::from_slice(&points_h_raw);
+    let mut d_points_h = DeviceVec::device_malloc_async(points_h.len(), &stream).unwrap();
+    d_points_h.copy_from_host_async(points_h, &stream).unwrap();
+    G1::from_mont(&mut d_points_h, &stream);
+    stream.synchronize().unwrap();
+    stream.destroy().unwrap();
+    
+    // let points_h = &zkey_cache.points_h;
     println!("MSM h input sizes - scalars: {}, points: {}", num_coef, points_h.len());
-    let pi_h = msm_helper(&d_vec[num_coef..num_coef * 2], points_h, &msm_config, "h");
+    let pi_h = msm_helper(&d_vec[num_coef..num_coef * 2], &d_points_h, &msm_config, "h");
 
     #[cfg(not(feature = "no-randomness"))]
     let (pi_a, pi_b, pi_c) = {
