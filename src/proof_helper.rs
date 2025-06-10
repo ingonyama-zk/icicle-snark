@@ -1,6 +1,6 @@
 use std::thread;
 use std::time::Instant;
-use icicle_bn254::curve:: G2Affine;
+use icicle_bn254::curve::G2Affine;
 use crate::{
     cache::{VerificationKey, ZKeyCache}, conversions::{deserialize_g1_affine, deserialize_g2_affine, from_u8, serialize_g1_affine, serialize_g2_affine}, file_wrapper::FileWrapper, icicle_helper::{msm_helper, ntt_helper}, ProjectiveG1, ProjectiveG2,
     F, G1, G2
@@ -11,7 +11,7 @@ use icicle_core::{
     field::Field, pairing::pairing, traits::{FieldImpl, MontgomeryConvertible}, vec_ops::{mul_scalars, sub_scalars, VecOpsConfig}, ntt::{NTTConfig, release_domain}
 };
 use icicle_runtime::{
-    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice}, stream::IcicleStream
+    memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice}, stream::IcicleStream, set_device, Device
 };
 use num_bigint::BigUint;
 use serde::{Serialize, Deserialize};
@@ -143,30 +143,59 @@ fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<
     };
 
     mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[2 * nof_coef..], &cfg).unwrap();
+    stream.synchronize().unwrap();
+    stream.destroy().unwrap();
 
     d_vec
 }
 
-fn compute_h(d_vec: &mut DeviceVec<ScalarField>, coset_gen: ScalarField, nof_coef: usize) -> DeviceVec<ScalarField> {
-    
-    println!("SP: INTT input size: {}", d_vec.len());
+fn compute_h(d_vec: &mut DeviceVec<ScalarField>, _coset_gen: ScalarField, nof_coef: usize, keys: &Vec<F>) -> DeviceVec<ScalarField> {
     let mut ntt_cfg = NTTConfig::default();
     ntt_cfg.is_async = true;
     ntt_cfg.batch_size = 3;
     ntt_helper(d_vec, true, &ntt_cfg);
 
-    ntt_cfg.coset_gen = coset_gen;
-    println!("SP: NTT input size: {}", d_vec.len());
-    ntt_helper(d_vec, false, &ntt_cfg);
-
-    // L * R - O
     let cfg: VecOpsConfig = VecOpsConfig::default();
+    let mut stream = IcicleStream::create().unwrap();
+    let mut d_keys = DeviceVec::device_malloc_async(keys.len(), &stream).unwrap();
+    d_keys
+        .copy_from_host_async(HostSlice::from_slice(&keys), &stream)
+        .unwrap();
+    stream.synchronize().unwrap();
+    stream.destroy().unwrap();
+
+    // ntt_cfg.coset_gen = coset_gen;
     let d_vec_copy = unsafe {
         DeviceSlice::from_mut_slice(std::slice::from_raw_parts_mut(
             d_vec.as_mut_ptr(),
             d_vec.len(),
         ))
     };
+
+    mul_scalars(
+        &d_vec[..nof_coef],
+        &d_keys[..],
+        &mut d_vec_copy[..nof_coef],
+        &cfg,
+    )
+    .unwrap();
+    mul_scalars(
+        &d_vec[nof_coef..nof_coef * 2],
+        &d_keys[..],
+        &mut d_vec_copy[nof_coef..2 * nof_coef],
+        &cfg,
+    )
+    .unwrap();
+    mul_scalars(
+        &d_vec[nof_coef * 2..],
+        &d_keys[..],
+        &mut d_vec_copy[2 * nof_coef..],
+        &cfg,
+    )
+    .unwrap();
+    ntt_helper(d_vec, false, &ntt_cfg);
+
+    // L * R - O
     mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[0..nof_coef], &cfg).unwrap();
     let mut d_h = DeviceVec::device_malloc(nof_coef).unwrap();
     sub_scalars(&d_vec[0..nof_coef], &d_vec[2 * nof_coef..], &mut d_h, &cfg).unwrap();
@@ -281,32 +310,38 @@ pub fn groth16_prove_helper(
     let buff_witness = wtns_file.read_section(&sections_wtns[..], 2).unwrap();
     let scalars = from_u8(buff_witness);
 
-    // TODO: move this to a separate thread operating on CPU
-    let (pi_a, pi_b1, pi_b, pi_c) = groth16_commitments(scalars, zkey_cache);
-    // END CPU
-    
-    // TODO: move this to a separate thread operating on METAL
-    let mut d_vec = construct_r1cs(scalars, zkey_cache);
-    let num_coef = header.domain_size;
-    let d_h = compute_h(&mut d_vec, zkey_cache.coset_gen, num_coef);
-    
-    let mut msm_config = MSMConfig::default();
-    msm_config.is_async = false;
-    // TODO: @jeremy try letting this be dynamic
-    msm_config.c = 14;
+    let (pi_a, pi_b1, pi_b, pi_c, pi_h) = std::thread::scope(|s| {
+        let cpu_thread = s.spawn(|| {
+            let device = Device::new("CPU", 0);
+            set_device(&device).unwrap();
+            groth16_commitments(scalars, zkey_cache)
+        });
 
-    let mut stream = IcicleStream::create().unwrap();
-    let points_h_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 9).unwrap());
-    let points_h = HostSlice::from_slice(&points_h_raw);
-    let mut d_points_h = DeviceVec::device_malloc_async(points_h.len(), &stream).unwrap();
-    d_points_h.copy_from_host_async(points_h, &stream).unwrap();
-    G1::from_mont(&mut d_points_h, &stream);
-    stream.synchronize().unwrap();
-    stream.destroy().unwrap();
-    
-    // let points_h = &zkey_cache.points_h;
-    println!("MSM h input sizes - scalars: {}, points: {}", num_coef, points_h.len());
-    let pi_h = msm_helper(&d_h[..], &d_points_h, &msm_config, "h");
+        let mut d_vec = construct_r1cs(scalars, zkey_cache);
+        let num_coef = header.domain_size;
+        let d_h = compute_h(&mut d_vec, zkey_cache.coset_gen, num_coef, &zkey_cache.keys);
+
+        let mut msm_config = MSMConfig::default();
+        msm_config.is_async = false;
+        // TODO: @jeremy try letting this be dynamic
+        // msm_config.c = 14;
+
+        let mut stream = IcicleStream::create().unwrap();
+        let points_h_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 9).unwrap());
+        let points_h = HostSlice::from_slice(&points_h_raw);
+        let mut d_points_h = DeviceVec::device_malloc_async(points_h.len(), &stream).unwrap();
+        d_points_h.copy_from_host_async(points_h, &stream).unwrap();
+        G1::from_mont(&mut d_points_h, &stream);
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+
+        println!("MSM h input sizes - scalars: {}, points: {}", num_coef, points_h.len());
+        let pi_h = msm_helper(&d_h, &d_points_h, &msm_config, "h");
+
+        let (pi_a, pi_b1, pi_b, pi_c) = cpu_thread.join().unwrap();
+
+        (pi_a, pi_b1, pi_b, pi_c, pi_h)
+    });
 
     #[cfg(not(feature = "no-randomness"))]
     let (pi_a, pi_b, pi_c) = {
