@@ -14,7 +14,7 @@ use serde::de::Deserializer;
 
 use crate::conversions::from_u8;
 use crate::file_wrapper::FileWrapper;
-use crate::zkey::ZKey;
+use crate::zkey::ZKeyHeader;
 use crate::{F, G1, G2};
 
 const W: [&str; 30] = [
@@ -61,8 +61,8 @@ pub struct ZKeyCache {
     pub points_b: DeviceVec<G2>,
     pub points_h: DeviceVec<G1>,
     pub points_c: DeviceVec<G1>,
-    pub keys: DeviceVec<F>,
-    pub zkey: ZKey,
+    pub zkey: ZKeyHeader,
+    pub coset_gen: F,
 }
 
 #[derive(Debug)]
@@ -108,6 +108,31 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
+    pub fn get_or_compute(&mut self, zkey_path: &str, device: &str) -> Result<(ZKeyCache, bool), Box<dyn std::error::Error>> {
+        #[cfg(not(feature = "mobile"))]
+        {
+            let cache_key = format!("{}_{}", zkey_path, device);
+            if self.cache.contains_key(&cache_key) {
+                return Ok(self.cache.get(&cache_key).unwrap().clone());
+            }
+        }
+
+        let cache = self.compute(zkey_path)?;
+        
+        let update_domain = false;
+        #[cfg(not(feature = "mobile"))]
+        {
+            self.cache.insert(cache_key, cache);
+            
+            if !self.last_key.is_empty() && !cache_key.eq(&self.last_key) {
+                update_domain = true;
+                self.last_key = cache_key.to_string();
+            }
+        }
+
+        Ok((cache, update_domain))
+    }
+
     pub fn compute(&mut self, zkey_path: &str) -> Result<ZKeyCache, Box<dyn std::error::Error>> {
         let mut stream = IcicleStream::create().unwrap();
 
@@ -158,14 +183,6 @@ impl CacheManager {
                 *coef_val = coef;
             });
 
-        let power = zkey.power + 1;
-        let inc = F::from_hex(W[power]);
-        let keys = CacheManager::pre_compute_keys(F::one(), inc, zkey.domain_size).unwrap();
-        let mut d_keys = DeviceVec::device_malloc_async(zkey.domain_size, &stream).unwrap();
-        d_keys
-            .copy_from_host_async(HostSlice::from_slice(&keys), &stream)
-            .unwrap();
-
         let points_a = zkey_file.read_section(&sections_zkey, 5).unwrap();
         let points_b1 = zkey_file.read_section(&sections_zkey, 6).unwrap();
         let points_b = zkey_file.read_section(&sections_zkey, 7).unwrap();
@@ -214,6 +231,8 @@ impl CacheManager {
         stream.synchronize().unwrap();
         stream.destroy().unwrap();
 
+        let coset_gen = F::from_hex(W[zkey.power + 1]);
+
         let cache_entry = ZKeyCache {
             s_values,
             c_values,
@@ -225,7 +244,7 @@ impl CacheManager {
             points_b: d_points_b,
             points_c: d_points_c,
             points_h: d_points_h,
-            keys: d_keys,
+            coset_gen,
         };
 
         Ok(cache_entry)

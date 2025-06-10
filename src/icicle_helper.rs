@@ -8,10 +8,10 @@ use icicle_core::{
 
 use icicle_runtime::{
     memory::{DeviceSlice, DeviceVec, HostSlice, HostOrDeviceSlice},
-    stream::IcicleStream,
 };
+use std::time::Instant;
 
-pub fn ntt_helper(vec: &mut DeviceSlice<F>, inverse: bool, stream: &IcicleStream)
+pub fn ntt_helper(vec: &mut DeviceSlice<F>, inverse: bool, cfg: &NTTConfig<F>)
 where
     <F as FieldImpl>::Config: NTT<F, F>,
 {
@@ -21,30 +21,22 @@ where
         NTTDir::kForward
     };
 
-    let mut cfg1 = NTTConfig::<F>::default();
-    cfg1.is_async = true;
-    cfg1.batch_size = 3;
-    cfg1.stream_handle = stream.into();
-
-    ntt_inplace(vec, dir, &cfg1).unwrap();
+    let timer = Instant::now();
+    ntt_inplace(vec, dir, cfg).unwrap();
+    println!("NTT took:\t\t{:?}", timer.elapsed());
 }
 
 pub fn msm_helper<C: Curve + MSM<C>>(
     scalars: &(impl HostOrDeviceSlice<C::ScalarField> + ?Sized),
-    // scalars: &(impl HostOrDeviceSlice<C::ScalarField>),
     points: &(impl HostOrDeviceSlice<Affine<C>> + ?Sized),
-    //stream: &IcicleStream,
-    msm_config: &MSMConfig, 
-) -> Vec<Projective<C>> 
+    msm_config: &MSMConfig,
+    msm_name: &str,
+) -> Projective<C>
 {
     let mut msm_result = vec![Projective::zero(); 1];
-    //let mut msm_result = HostSlice::<Projective<C>>::device_malloc_async(1, stream).unwrap();
-    // let mut msm_config = MSMConfig::default();
-    // msm_config.stream_handle = stream.into();
-    //msm_config.is_async = true;
-    //msm_config.c = 16; // SP TODO
 
+    let timer = Instant::now();
     msm(scalars, points, &msm_config, HostSlice::from_mut_slice(&mut msm_result[..])).unwrap();
-
-    msm_result
+    println!("{:?} MSM took:\t\t{:?}", msm_name, timer.elapsed());
+    msm_result[0]
 }

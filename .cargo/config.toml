@@ -1,5 +1,10 @@
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-lc++"]
+rustflags = [
+    "-C", "link-arg=-lc++",
+    "-C", "link-arg=-Wl,-rpath,@loader_path",
+    "-C", "link-arg=-Wl,-rpath,@loader_path/deps/icicle/lib", # If libraries are in a 'lib' subdir
+    "-C", "link-arg=-Wl,-rpath,/Users/jeremy/ingonyama/inhouse/icicle-snark/target/debug", # Absolute path for debug libs
+]
 
 [target.aarch64-apple-ios-sim]
 rustflags = [

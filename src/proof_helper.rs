@@ -7,7 +7,7 @@ use crate::{
 use icicle_bn254::curve::{G1Projective, ScalarField};
 use icicle_core::{
     msm::{MSMConfig}, 
-    field::Field, pairing::pairing, traits::{FieldImpl, MontgomeryConvertible}, vec_ops::{mul_scalars, sub_scalars, VecOpsConfig}, ntt::release_domain
+    field::Field, pairing::pairing, traits::{FieldImpl, MontgomeryConvertible}, vec_ops::{mul_scalars, sub_scalars, VecOpsConfig}, ntt::{NTTConfig, release_domain}
 };
 use icicle_runtime::{
     memory::{DeviceSlice, DeviceVec, HostOrDeviceSlice, HostSlice}, stream::IcicleStream
@@ -50,7 +50,6 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     let s_values = &zkey_cache.s_values;
     let c_values = &zkey_cache.c_values;
     let m_values = &zkey_cache.m_values;
-    let keys = &zkey_cache.keys;
 
     let mut second_slice = Vec::with_capacity(n_coef);
     unsafe {
@@ -113,32 +112,15 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[2 * nof_coef..], &cfg).unwrap();
     
     println!("SP: INTT input size: {}", d_vec.len());
-    ntt_helper(&mut d_vec, true, &stream);
+    let mut ntt_cfg = NTTConfig::default();
+    ntt_cfg.stream_handle = (&stream).into();
+    ntt_cfg.is_async = true;
+    ntt_cfg.batch_size = 3;
+    ntt_helper(&mut d_vec, true, &ntt_cfg);
 
-    mul_scalars(
-        &d_vec[..nof_coef],
-        &keys[..],
-        &mut d_vec_copy[..nof_coef],
-        &cfg,
-    )
-    .unwrap();
-    mul_scalars(
-        &d_vec[nof_coef..nof_coef * 2],
-        &keys[..],
-        &mut d_vec_copy[nof_coef..2 * nof_coef],
-        &cfg,
-    )
-    .unwrap();
-    mul_scalars(
-        &d_vec[nof_coef * 2..],
-        &keys[..],
-        &mut d_vec_copy[2 * nof_coef..],
-        &cfg,
-    )
-    .unwrap();
-
+    ntt_cfg.coset_gen = zkey_cache.coset_gen;
     println!("SP: NTT input size: {}", d_vec.len());
-    ntt_helper(&mut d_vec, false, &stream);
+    ntt_helper(&mut d_vec, false, &ntt_cfg);
 
     stream.synchronize().unwrap();
     stream.destroy().unwrap();
@@ -188,7 +170,6 @@ fn count_similar_scalars(scalars: &[F]) {
 }
 
 pub fn groth16_commitments(
-    d_vec: DeviceVec<F>,
     scalars: &[F],
     zkey_cache: &ZKeyCache,
 ) -> (
@@ -196,105 +177,47 @@ pub fn groth16_commitments(
     ProjectiveG1,
     ProjectiveG2,
     ProjectiveG1,
-    ProjectiveG1,
 ) {
-    let nof_coef = zkey_cache.zkey.domain_size;
-    let points_a = &zkey_cache.points_a;
-    let points_b1 = &zkey_cache.points_b1;
-    let points_b = &zkey_cache.points_b;
-    let points_c = &zkey_cache.points_c;
-    let points_h = &zkey_cache.points_h;
+    let host_scalars = HostSlice::from_slice(scalars);
+    let mut msm_config = MSMConfig::default();
+    msm_config.is_async = false;
+    msm_config.c = 14;
+    msm_config.are_bases_montgomery_form = true;
+    
+    let a: ProjectiveG1;
+    let b1: ProjectiveG1;
+    let b: ProjectiveG2;
+    let c: ProjectiveG1;
+    
+    {
+        // let points_a = from_u8(zkey_file.read_section(sections_zkey, 5).unwrap());
+        let points_a = &zkey_cache.points_a;
+        println!("MSM a input sizes - scalars: {}, points: {}", host_scalars.len(), points_a.len());
+        a = msm_helper(&host_scalars[..], points_a, &msm_config, "a");
+    }
+    
+    {
+        // let points_b1 = from_u8(zkey_file.read_section(sections_zkey, 6).unwrap());
+        let points_b1 = &zkey_cache.points_b1;
+        println!("MSM b1 input sizes - scalars: {}, points: {}", host_scalars.len(), points_b1.len());
+        b1 = msm_helper(&host_scalars[..], points_b1, &msm_config, "b1");
+    }
+    
+    {
+        // let points_b = from_u8(zkey_file.read_section(sections_zkey, 7).unwrap());
+        let points_b = &zkey_cache.points_b;
+        println!("MSM b input sizes - scalars: {}, points: {}", host_scalars.len(), points_b.len());
+        b = msm_helper(&host_scalars[..], points_b, &msm_config, "b");
+    }
+    
+    {
+        // let points_c = from_u8(zkey_file.read_section(sections_zkey, 8).unwrap());
+        let points_c = &zkey_cache.points_c;
+        println!("MSM c input sizes - scalars: {}, points: {}", zkey_cache.zkey.n_public + 1, points_c.len());
+        c = msm_helper(&host_scalars[zkey_cache.zkey.n_public + 1..], points_c, &msm_config, "c");
+    }
 
-    // Count similar scalars
-    // count_similar_scalars(scalars);
-
-    // Clone data needed for G2 thread
-    let scalars_g2 = scalars.to_vec();
-    let points_b_g2 = points_b.clone();
-
-    let mut h_points_b_g2 = vec![G2Affine::zero(); points_b_g2.len()];
-    let tmp = HostSlice::from_mut_slice(&mut h_points_b_g2[..]);
-    points_b_g2.copy_to_host(tmp).unwrap();
-
-    // Spawn G2 thread
-    //let handle_g2 = thread::spawn(move || {
-        
-        //let device_g2 = icicle_runtime::Device::new("CPU", 0 /* =device_id*/);
-        //let device_g2 = icicle_runtime::Device::new("METAL", 0 /* =device_id*/);
-        //icicle_runtime::set_device(&device_g2).unwrap();
-        let mut stream_g2 = IcicleStream::create().unwrap();
-        let scalars_g2 = HostSlice::from_slice(&scalars_g2);
-        // let mut d_scalars_g2 = DeviceVec::device_malloc_async(scalars.len(), &stream_g2).unwrap();
-        // d_scalars_g2.copy_from_host_async(scalars, &stream_g2).unwrap();
-        // let mut d_points_b_g2 = DeviceVec::device_malloc_async(points_b_g2.len(), &stream_g2).unwrap();
-        // d_points_b_g2.copy_from_host_async(HostSlice::from_slice(&points_b_g2), &stream_g2).unwrap();
-        
-        println!("Starting G2 MSM");
-        let mut g2_msm_config = MSMConfig::default();
-        g2_msm_config.stream_handle = (&stream_g2).into();
-        g2_msm_config.is_async = false;
-        g2_msm_config.c = 16; // SP TODO
-        let g2_start = Instant::now();
-        println!("SP: MSM B input sizes - scalars: {}, points: {}", scalars_g2.len(), h_points_b_g2.len());
-        //let commitment_b = msm_helper(scalars, HostSlice::from_slice(&h_points_b_g2), &stream_g2);
-        let commitment_b = msm_helper(scalars_g2, &points_b_g2[..], &g2_msm_config);
-        println!("G2 MSM took: {:?}", g2_start.elapsed());
-
-        // let mut pi_b = [ProjectiveG2::zero(); 1];
-        // commitment_b.copy_to_host_async(HostSlice::from_mut_slice(&mut pi_b[..]), &stream_g2).unwrap();
-        // pi_b = commitment_b[0];
-        stream_g2.synchronize().unwrap();
-        stream_g2.destroy().unwrap();
-        
-        // pi_b[0]
-        //commitment_b[0]
-    //});
-    // Wait for G2 thread to complete
-    //let pi_b = handle_g2.join().unwrap();
-    let pi_b = commitment_b[0];
-    // Main thread handles G1 operations
-    let mut stream_g1 = IcicleStream::create().unwrap();
-    let mut g1_msm_config = MSMConfig::default();
-    g1_msm_config.stream_handle = (&stream_g1).into();
-    g1_msm_config.is_async = false;
-    g1_msm_config.c = 16; // SP TODO
-    let scalars = HostSlice::from_slice(scalars);
-    let mut d_scalars_g1 = DeviceVec::device_malloc_async(scalars.len(), &stream_g1).unwrap();
-    d_scalars_g1.copy_from_host_async(scalars, &stream_g1).unwrap();
-
-    println!("Starting G1 MSMs");
-    let g1_start = Instant::now();
-    println!("SP: MSM A input sizes - scalars: {}, points: {}", d_scalars_g1.len(), points_a.len());
-    let commitment_a = msm_helper(&d_scalars_g1[..], points_a, &g1_msm_config);
-    println!("SP: MSM B1 input sizes - scalars: {}, points: {}", d_scalars_g1.len(), points_b1.len());
-    let commitment_b1 = msm_helper(&d_scalars_g1[..], points_b1, &g1_msm_config);
-    println!("SP: MSM C input sizes - scalars: {}, points: {}", d_scalars_g1[zkey_cache.zkey.n_public + 1..].len(), points_c.len());
-    let commitment_c = msm_helper(&d_scalars_g1[zkey_cache.zkey.n_public + 1..], points_c, &g1_msm_config);
-    println!("SP: MSM H input sizes - scalars: {}, points: {}", d_vec[nof_coef..nof_coef * 2].len(), points_h.len());
-    let commitment_h = msm_helper(&d_vec[nof_coef..nof_coef * 2], points_h, &g1_msm_config);
-    println!("4 G1 MSMs took: {:?}", g1_start.elapsed());
-
-    // let mut pi_a = [ProjectiveG1::zero(); 1];
-    // let mut pi_b1 = [ProjectiveG1::zero(); 1];
-    // let mut pi_c = [ProjectiveG1::zero(); 1];
-    // let mut pi_h = [ProjectiveG1::zero(); 1];
-
-    // commitment_a.HostSlice::from_mut_slice(&mut pi_a[..]), &stream_g1).unwrap();
-    // commitment_b1.copy_to_host_async(HostSlice::from_mut_slice(&mut pi_b1[..]), &stream_g1).unwrap();
-    // commitment_c.copy_to_host_async(HostSlice::from_mut_slice(&mut pi_c[..]), &stream_g1).unwrap();
-    // commitment_h.copy_to_host_async(HostSlice::from_mut_slice(&mut pi_h[..]), &stream_g1).unwrap();
-    // pi_a = commitment_a;
-    // pi_b1 = commitment_b1;
-    // pi_c = commitment_c;
-    // pi_h = commitment_h;
-
-    stream_g1.synchronize().unwrap();
-    stream_g1.destroy().unwrap();
-
-    // Wait for G2 thread to complete
-    // let pi_b = handle_g2.join().unwrap();
-
-    (commitment_a[0], commitment_b1[0], pi_b, commitment_c[0], commitment_h[0])
+    (a, b1, b, c)
 }
 
 pub fn groth16_prove_helper(
@@ -326,7 +249,19 @@ pub fn groth16_prove_helper(
 
     let d_vec = construct_r1cs(scalars, zkey_cache);
 
-    let (pi_a, pi_b1, pi_b, pi_c, pi_h) = groth16_commitments(d_vec, scalars, zkey_cache);
+    // TODO: move this to a separate thread operating on CPU
+    let (pi_a, pi_b1, pi_b, pi_c) = groth16_commitments(scalars, zkey_cache);
+    // END CPU
+    
+    // TODO: move this to a separate thread operating on METAL
+    let num_coef = zkey_cache.zkey.domain_size;
+    let mut msm_config = MSMConfig::default();
+    msm_config.is_async = false;
+    msm_config.c = 14;
+    msm_config.are_bases_montgomery_form = true;
+    let points_h = &zkey_cache.points_h;
+    println!("MSM h input sizes - scalars: {}, points: {}", num_coef, points_h.len());
+    let pi_h = msm_helper(&d_vec[num_coef..num_coef * 2], points_h, &msm_config, "h");
 
     #[cfg(not(feature = "no-randomness"))]
     let (pi_a, pi_b, pi_c) = {

@@ -7,7 +7,7 @@ use std::io::{self, BufWriter, Read, Seek, SeekFrom};
 use std::mem;
 use std::path::Path;
 
-use crate::zkey::ZKey;
+use crate::zkey::ZKeyHeader;
 use crate::{F, G1, G2};
 
 const GROTH16_PROTOCOL_ID: u32 = 1;
@@ -207,12 +207,12 @@ impl FileWrapper {
         Ok(&self.mmap[start..end])
     }
 
-    pub fn read_zkey_header(&mut self, sections: &[Vec<Section>]) -> io::Result<ZKey> {
+    pub fn read_zkey_header(&mut self, sections: &[Vec<Section>]) -> io::Result<ZKeyHeader> {
         self.start_read_unique_section(sections, 1).unwrap();
         let protocol_id = self.read_u32_le().unwrap();
         self.end_read_section(false).unwrap();
         match protocol_id {
-            GROTH16_PROTOCOL_ID => ZKey::read_header_groth16(self, sections),
+            GROTH16_PROTOCOL_ID => ZKeyHeader::read_header_groth16(self, sections),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Protocol not supported",
