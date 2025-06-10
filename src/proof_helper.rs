@@ -39,18 +39,59 @@ fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<
     cfg.is_async = true;
     cfg.stream_handle = *stream;
 
-    let n_coef = zkey_cache.c_values.len();
-    let nof_coef = zkey_cache.header.domain_size;
+    // ------------------------------------------------------------
+    let buff_coeffs = zkey_cache.file.read_section(&zkey_cache.sections[..], 4).unwrap();
+    let s_coef = 4 * 3 + zkey_cache.header.n8r;
+    let n_coef = (buff_coeffs.len() - 4) / s_coef;
 
-    let mut d_second_slice = DeviceVec::device_malloc_async(n_coef, &stream).unwrap();
-    let mut d_vec = DeviceVec::device_malloc_async(nof_coef * 3, &stream).unwrap();
+    let mut first_slice = Vec::with_capacity(n_coef);
+    let mut s_values = Vec::with_capacity(n_coef);
+    let mut c_values = Vec::with_capacity(n_coef);
+    let mut m_values = Vec::with_capacity(n_coef);
 
-    let mut out_buff_b_a = vec![ScalarField::zero(); nof_coef * 2];
+    unsafe {
+        first_slice.set_len(n_coef);
+        s_values.set_len(n_coef);
+        c_values.set_len(n_coef);
+        m_values.set_len(n_coef);
+    }
+    let n8 = 32;
 
-    let first_slice = &zkey_cache.first_slice;
-    let s_values = &zkey_cache.s_values;
-    let c_values = &zkey_cache.c_values;
-    let m_values = &zkey_cache.m_values;
+    s_values
+        .par_iter_mut()
+        .zip(c_values.par_iter_mut())
+        .zip(m_values.par_iter_mut())
+        .zip(first_slice.par_iter_mut())
+        .enumerate()
+        .for_each(|(i, (((s_val, c_val), m_val), coef_val))| {
+            let start = 4 + i * s_coef;
+            let buff_coef = &buff_coeffs[start..start + s_coef];
+
+            let s =
+                u32::from_le_bytes([buff_coef[8], buff_coef[9], buff_coef[10], buff_coef[11]])
+                    as usize;
+            let c = u32::from_le_bytes([buff_coef[4], buff_coef[5], buff_coef[6], buff_coef[7]])
+                as usize;
+            let m = buff_coef[0];
+            let coef = ScalarField::from_bytes_le(&buff_coef[12..12 + n8]);
+
+            *s_val = s;
+            *c_val = c;
+            *m_val = m as usize;
+            *coef_val = coef;
+        });
+
+    let mut d_first_slice = DeviceVec::device_malloc_async(first_slice.len(), &stream).unwrap();
+    let first_slice = HostSlice::from_slice(&first_slice);
+    d_first_slice
+        .copy_from_host_async(first_slice, &stream)
+        .unwrap();
+
+    ScalarField::from_mont(&mut d_first_slice, &stream);
+
+    stream.synchronize().unwrap();
+    stream.destroy().unwrap();
+    // ------------------------------------------------------------
 
     let mut second_slice = Vec::with_capacity(n_coef);
     unsafe {
@@ -73,15 +114,18 @@ fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<
     }
     let res = HostSlice::from_mut_slice(&mut res);
 
+    let mut d_second_slice = DeviceVec::device_malloc_async(n_coef, &stream).unwrap();
     d_second_slice
         .copy_from_host_async(second_slice, &stream)
         .unwrap();
     ScalarField::from_mont(&mut d_second_slice, &stream);
-    mul_scalars(&first_slice[..], &d_second_slice, res, &cfg).unwrap();
+    mul_scalars(&d_first_slice[..], &d_second_slice, res, &cfg).unwrap();
 
     stream.synchronize().unwrap();
 
+    let nof_coef = zkey_cache.header.domain_size;
     let zero_scalar = ScalarField::zero();
+    let mut out_buff_b_a = vec![ScalarField::zero(); nof_coef * 2];
 
     for i in 0..n_coef {
         let c = c_values[i];
@@ -95,6 +139,8 @@ fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<
             *value = *value + res[i];
         }
     }
+
+    let mut d_vec = DeviceVec::device_malloc_async(nof_coef * 3, &stream).unwrap();
 
     d_vec[0..nof_coef]
         .copy_from_host_async(HostSlice::from_slice(&out_buff_b_a[nof_coef..]), &stream)
@@ -255,13 +301,13 @@ pub fn groth16_prove_helper(
     
     // TODO: move this to a separate thread operating on METAL
     let mut d_vec = construct_r1cs(scalars, zkey_cache);
-    let d_h = compute_h(&mut d_vec, zkey_cache.coset_gen, header.domain_size);
-    let num_coef = zkey_cache.header.domain_size;
+    let num_coef = header.domain_size;
+    let d_h = compute_h(&mut d_vec, zkey_cache.coset_gen, num_coef);
+    
     let mut msm_config = MSMConfig::default();
     msm_config.is_async = false;
+    // TODO: @jeremy try letting this be dynamic
     msm_config.c = 14;
-    // msm_config.are_bases_montgomery_form = true;
-
 
     let mut stream = IcicleStream::create().unwrap();
     let points_h_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 9).unwrap());

@@ -52,10 +52,6 @@ const W: [&str; 30] = [
 
 //#[derive(Clone)]
 pub struct ZKeyCache {
-    pub s_values: Vec<usize>,
-    pub c_values: Vec<usize>,
-    pub m_values: Vec<usize>,
-    pub first_slice: DeviceVec<F>,
     pub file: FileWrapper,
     pub sections: Vec<Vec<Section>>,
     pub header: ZKeyHeader,
@@ -131,74 +127,13 @@ impl CacheManager {
     }
 
     pub fn compute(&mut self, zkey_path: &str) -> Result<ZKeyCache, Box<dyn std::error::Error>> {
-        let mut stream = IcicleStream::create().unwrap();
-
         let (fd_zkey, sections) = FileWrapper::read_bin_file(zkey_path, "zkey", 2).unwrap();
-
         let mut file = FileWrapper::new(fd_zkey).unwrap();
-
-
         let header = file.read_zkey_header(&sections[..]).unwrap();
-        let buff_coeffs = file.read_section(&sections[..], 4).unwrap();
-        let s_coef = 4 * 3 + header.n8r;
-        let n_coef = (buff_coeffs.len() - 4) / s_coef;
-
-        let mut first_slice = Vec::with_capacity(n_coef);
-        let mut s_values = Vec::with_capacity(n_coef);
-        let mut c_values = Vec::with_capacity(n_coef);
-        let mut m_values = Vec::with_capacity(n_coef);
-
-        unsafe {
-            first_slice.set_len(n_coef);
-            s_values.set_len(n_coef);
-            c_values.set_len(n_coef);
-            m_values.set_len(n_coef);
-        }
-        let n8 = 32;
-
-        s_values
-            .par_iter_mut()
-            .zip(c_values.par_iter_mut())
-            .zip(m_values.par_iter_mut())
-            .zip(first_slice.par_iter_mut())
-            .enumerate()
-            .for_each(|(i, (((s_val, c_val), m_val), coef_val))| {
-                let start = 4 + i * s_coef;
-                let buff_coef = &buff_coeffs[start..start + s_coef];
-
-                let s =
-                    u32::from_le_bytes([buff_coef[8], buff_coef[9], buff_coef[10], buff_coef[11]])
-                        as usize;
-                let c = u32::from_le_bytes([buff_coef[4], buff_coef[5], buff_coef[6], buff_coef[7]])
-                    as usize;
-                let m = buff_coef[0];
-                let coef = ScalarField::from_bytes_le(&buff_coef[12..12 + n8]);
-
-                *s_val = s;
-                *c_val = c;
-                *m_val = m as usize;
-                *coef_val = coef;
-            });
-
-        let mut d_first_slice = DeviceVec::device_malloc_async(first_slice.len(), &stream).unwrap();
-        let first_slice = HostSlice::from_slice(&first_slice);
-        d_first_slice
-            .copy_from_host_async(first_slice, &stream)
-            .unwrap();
-
-        ScalarField::from_mont(&mut d_first_slice, &stream);
-
-        stream.synchronize().unwrap();
-        stream.destroy().unwrap();
-
         let coset_gen = F::from_hex(W[header.power + 1]);
 
         let cache_entry = ZKeyCache {
-            s_values,
-            c_values,
-            m_values,
             header,
-            first_slice: d_first_slice,
             file,
             sections,
             coset_gen,
