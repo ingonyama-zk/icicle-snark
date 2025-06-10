@@ -33,7 +33,7 @@ pub struct Proof {
     pub curve: String,
 }
 
-pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<ScalarField> {
+fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> DeviceVec<ScalarField> {
     let mut stream = IcicleStream::create().unwrap();
     let mut cfg = VecOpsConfig::default();
     cfg.is_async = true;
@@ -111,30 +111,39 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     };
 
     mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[2 * nof_coef..], &cfg).unwrap();
-    
-    println!("SP: INTT input size: {}", d_vec.len());
-    let mut ntt_cfg = NTTConfig::default();
-    ntt_cfg.stream_handle = (&stream).into();
-    ntt_cfg.is_async = true;
-    ntt_cfg.batch_size = 3;
-    ntt_helper(&mut d_vec, true, &ntt_cfg);
 
-    ntt_cfg.coset_gen = zkey_cache.coset_gen;
-    println!("SP: NTT input size: {}", d_vec.len());
-    ntt_helper(&mut d_vec, false, &ntt_cfg);
-
-    stream.synchronize().unwrap();
-    stream.destroy().unwrap();
-
-    // L * R - O
-    let cfg: VecOpsConfig = VecOpsConfig::default();
-    mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[0..nof_coef], &cfg).unwrap();
-    sub_scalars(&d_vec[0..nof_coef], &d_vec[2 * nof_coef..], &mut d_vec_copy[nof_coef..nof_coef * 2], &cfg).unwrap();
-    //r1csrelease_domain::<ScalarField>();    
     d_vec
 }
 
-pub fn groth16_commitments(
+fn compute_h(d_vec: &mut DeviceVec<ScalarField>, coset_gen: ScalarField, nof_coef: usize) -> DeviceVec<ScalarField> {
+    
+    println!("SP: INTT input size: {}", d_vec.len());
+    let mut ntt_cfg = NTTConfig::default();
+    ntt_cfg.is_async = true;
+    ntt_cfg.batch_size = 3;
+    ntt_helper(d_vec, true, &ntt_cfg);
+
+    ntt_cfg.coset_gen = coset_gen;
+    println!("SP: NTT input size: {}", d_vec.len());
+    ntt_helper(d_vec, false, &ntt_cfg);
+
+    // L * R - O
+    let cfg: VecOpsConfig = VecOpsConfig::default();
+    let d_vec_copy = unsafe {
+        DeviceSlice::from_mut_slice(std::slice::from_raw_parts_mut(
+            d_vec.as_mut_ptr(),
+            d_vec.len(),
+        ))
+    };
+    mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[0..nof_coef], &cfg).unwrap();
+    let mut d_h = DeviceVec::device_malloc(nof_coef).unwrap();
+    sub_scalars(&d_vec[0..nof_coef], &d_vec[2 * nof_coef..], &mut d_h, &cfg).unwrap();
+    release_domain::<ScalarField>();
+
+    d_h
+}
+
+fn groth16_commitments(
     scalars: &[F],
     zkey_cache: &ZKeyCache,
 ) -> (
@@ -222,40 +231,38 @@ pub fn groth16_prove_helper(
     zkey_cache: &ZKeyCache,
 ) -> Result<(Value, Value), Box<dyn std::error::Error>> {   
     let (fd_wtns, sections_wtns) = FileWrapper::read_bin_file(witness, "wtns", 2).unwrap();
-
     let mut wtns_file = FileWrapper::new(fd_wtns).unwrap();
-
     let wtns = wtns_file.read_wtns_header(&sections_wtns[..]).unwrap();
+    let header = &zkey_cache.header;
 
-    let zkey = &zkey_cache.header;
-
-    if !F::eq(&zkey.r, &wtns.q) {
+    if !F::eq(&header.r, &wtns.q) {
         panic!("Curve of the witness does not match the curve of the proving key");
     }
 
-    if wtns.n_witness != zkey.n_vars {
+    if wtns.n_witness != header.n_vars {
         panic!(
             "Invalid witness length. Circuit: {}, witness: {}",
-            zkey.n_vars, wtns.n_witness
+            header.n_vars, wtns.n_witness
         );
     }
 
     let buff_witness = wtns_file.read_section(&sections_wtns[..], 2).unwrap();
-
     let scalars = from_u8(buff_witness);
-
-    let d_vec = construct_r1cs(scalars, zkey_cache);
 
     // TODO: move this to a separate thread operating on CPU
     let (pi_a, pi_b1, pi_b, pi_c) = groth16_commitments(scalars, zkey_cache);
     // END CPU
     
     // TODO: move this to a separate thread operating on METAL
+    let mut d_vec = construct_r1cs(scalars, zkey_cache);
+    let d_h = compute_h(&mut d_vec, zkey_cache.coset_gen, header.domain_size);
     let num_coef = zkey_cache.header.domain_size;
     let mut msm_config = MSMConfig::default();
     msm_config.is_async = false;
     msm_config.c = 14;
     // msm_config.are_bases_montgomery_form = true;
+
+
     let mut stream = IcicleStream::create().unwrap();
     let points_h_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 9).unwrap());
     let points_h = HostSlice::from_slice(&points_h_raw);
@@ -267,7 +274,7 @@ pub fn groth16_prove_helper(
     
     // let points_h = &zkey_cache.points_h;
     println!("MSM h input sizes - scalars: {}, points: {}", num_coef, points_h.len());
-    let pi_h = msm_helper(&d_vec[num_coef..num_coef * 2], &d_points_h, &msm_config, "h");
+    let pi_h = msm_helper(&d_h[..], &d_points_h, &msm_config, "h");
 
     #[cfg(not(feature = "no-randomness"))]
     let (pi_a, pi_b, pi_c) = {
@@ -275,10 +282,10 @@ pub fn groth16_prove_helper(
         let r = rs[0];
         let s = rs[1];
 
-        let pi_a = pi_a + zkey.vk_alpha_1 + zkey.vk_delta_1 * r;
-        let pi_b = pi_b + zkey.vk_beta_2 + zkey.vk_delta_2 * s;
-        let pi_b1 = pi_b1 + zkey.vk_beta_1 + zkey.vk_delta_1 * s;
-        let pi_c = pi_c + pi_h + pi_a * s + pi_b1 * r - zkey.vk_delta_1 * r * s;
+        let pi_a = pi_a + header.vk_alpha_1 + header.vk_delta_1 * r;
+        let pi_b = pi_b + header.vk_beta_2 + header.vk_delta_2 * s;
+        let pi_b1 = pi_b1 + header.vk_beta_1 + header.vk_delta_1 * s;
+        let pi_c = pi_c + pi_h + pi_a * s + pi_b1 * r - header.vk_delta_1 * r * s;
 
         (pi_a, pi_b, pi_c)
     };
@@ -292,10 +299,10 @@ pub fn groth16_prove_helper(
         (pi_a, pi_b, pi_c)
     };
 
-    let mut public_signals = Vec::with_capacity(zkey.n_public);
+    let mut public_signals = Vec::with_capacity(header.n_public);
     let field_size = ScalarField::zero().to_bytes_le().len();
 
-    for i in 1..=zkey.n_public {
+    for i in 1..=header.n_public {
         let start = i * field_size;
         let end = start + field_size;
         let b = &buff_witness[start..end];
