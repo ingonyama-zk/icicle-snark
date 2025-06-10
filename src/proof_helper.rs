@@ -217,7 +217,6 @@ fn groth16_commitments(
     let mut msm_config = MSMConfig::default();
     msm_config.is_async = false;
     msm_config.c = 14;
-    // msm_config.are_bases_montgomery_form = true;
     
     let a: ProjectiveG1;
     let b1: ProjectiveG1;
@@ -323,8 +322,6 @@ pub fn groth16_prove_helper(
 
         let mut msm_config = MSMConfig::default();
         msm_config.is_async = false;
-        // TODO: @jeremy try letting this be dynamic
-        // msm_config.c = 14;
 
         let mut stream = IcicleStream::create().unwrap();
         let points_h_raw = from_u8(&zkey_cache.file.read_section(&zkey_cache.sections, 9).unwrap());
