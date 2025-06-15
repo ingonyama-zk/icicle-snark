@@ -27,7 +27,8 @@ fn try_load_and_set_backend_device(device_type: &str) {
     // if device_type != "CPU" {
     //     icicle_runtime::runtime::load_backend_from_env_or_default().unwrap();
     // }
-    let device = icicle_runtime::Device::new(device_type, 0 /* =device_id*/);
+    let device_type_str = "CPU";
+    let device = icicle_runtime::Device::new(device_type_str, 0 /* =device_id*/);
     icicle_runtime::set_device(&device).unwrap();
 }
 
@@ -63,15 +64,12 @@ pub fn groth16_verify(
     vk: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let proof_str = std::fs::read_to_string(proof)?;
-    println!("SP: proof_str: {}", proof_str);
     let proof: Proof = serde_json::from_str(&proof_str)?;
 
     let public_str = std::fs::read_to_string(public)?;
-    println!("SP: public_str: {}", public_str);
     let public: Vec<String> = serde_json::from_str(&public_str)?;
 
     let vk_str = std::fs::read_to_string(vk)?;
-    println!("SP: vk_str: {}", vk_str);
     let vk: VerificationKey = serde_json::from_str(&vk_str)?;
 
     let pairing_result = groth16_verify_helper(&proof, &public, &vk)?;

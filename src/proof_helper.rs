@@ -112,7 +112,6 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
 
     mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[2 * nof_coef..], &cfg).unwrap();
     
-    println!("SP: INTT input size: {}", d_vec.len());
     ntt_helper(&mut d_vec, true, &stream);
 
     mul_scalars(
@@ -137,7 +136,6 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     )
     .unwrap();
 
-    println!("SP: NTT input size: {}", d_vec.len());
     ntt_helper(&mut d_vec, false, &stream);
 
     stream.synchronize().unwrap();
@@ -149,42 +147,6 @@ pub fn construct_r1cs(witness: &[ScalarField], zkey_cache: &ZKeyCache) -> Device
     sub_scalars(&d_vec[0..nof_coef], &d_vec[2 * nof_coef..], &mut d_vec_copy[nof_coef..nof_coef * 2], &cfg).unwrap();
     //r1csrelease_domain::<ScalarField>();    
     d_vec
-}
-
-// Function for the first thread - sums array elements
-fn afun(arr: Vec<i32>) -> i32 {
-    println!("Thread A processing: {:?}", arr);
-    arr.iter().sum()
-}
-
-fn count_similar_scalars(scalars: &[F]) {
-    use std::collections::HashMap;
-    let mut scalar_counts: HashMap<String, usize> = HashMap::new();
-    for scalar in scalars {
-        let scalar_str = format!("{:?}", scalar);
-        *scalar_counts.entry(scalar_str).or_insert(0) += 1;
-    }
-    
-    // Count how many scalars appear 1, 2, 3, etc. times
-    let mut frequency_distribution: HashMap<usize, usize> = HashMap::new();
-    for count in scalar_counts.values() {
-        *frequency_distribution.entry(*count).or_insert(0) += 1;
-    }
-    
-    println!("SP: Scalar frequency distribution:");
-    let mut frequencies: Vec<_> = frequency_distribution.keys().collect();
-    frequencies.sort();
-    for freq in frequencies {
-        let count = frequency_distribution[freq];
-        println!("SP: {} scalars appear {} times", count, freq);
-    }
-
-    println!("\nSP: Detailed scalar values and counts:");
-    let mut sorted_scalars: Vec<_> = scalar_counts.iter().collect();
-    sorted_scalars.sort_by(|a, b| b.1.cmp(a.1)); // Sort by count in descending order
-    for (scalar, count) in sorted_scalars {
-        println!("SP: Value: {} appears {} times", scalar, count);
-    }
 }
 
 pub fn groth16_commitments(
@@ -204,9 +166,6 @@ pub fn groth16_commitments(
     let points_b = &zkey_cache.points_b;
     let points_c = &zkey_cache.points_c;
     let points_h = &zkey_cache.points_h;
-
-    // Count similar scalars
-    // count_similar_scalars(scalars);
 
     // Clone data needed for G2 thread
     let scalars_g2 = scalars.to_vec();
@@ -235,7 +194,6 @@ pub fn groth16_commitments(
         g2_msm_config.is_async = false;
         g2_msm_config.c = 16; // SP TODO
         let g2_start = Instant::now();
-        println!("SP: MSM B input sizes - scalars: {}, points: {}", scalars_g2.len(), h_points_b_g2.len());
         //let commitment_b = msm_helper(scalars, HostSlice::from_slice(&h_points_b_g2), &stream_g2);
         let commitment_b = msm_helper(scalars_g2, &points_b_g2[..], &g2_msm_config);
         println!("G2 MSM took: {:?}", g2_start.elapsed());
@@ -264,14 +222,21 @@ pub fn groth16_commitments(
 
     println!("Starting G1 MSMs");
     let g1_start = Instant::now();
-    println!("SP: MSM A input sizes - scalars: {}, points: {}", d_scalars_g1.len(), points_a.len());
+    let g1_a_start = Instant::now();
     let commitment_a = msm_helper(&d_scalars_g1[..], points_a, &g1_msm_config);
-    println!("SP: MSM B1 input sizes - scalars: {}, points: {}", d_scalars_g1.len(), points_b1.len());
+    println!("G1 MSM A took: {:?}", g1_a_start.elapsed());
+
     let commitment_b1 = msm_helper(&d_scalars_g1[..], points_b1, &g1_msm_config);
-    println!("SP: MSM C input sizes - scalars: {}, points: {}", d_scalars_g1[zkey_cache.zkey.n_public + 1..].len(), points_c.len());
     let commitment_c = msm_helper(&d_scalars_g1[zkey_cache.zkey.n_public + 1..], points_c, &g1_msm_config);
-    println!("SP: MSM H input sizes - scalars: {}, points: {}", d_vec[nof_coef..nof_coef * 2].len(), points_h.len());
+    g1_msm_config.c = 15;
+   
+    // Copy device slice to host memory for counting
+    //let mut h_scalars = vec![F::zero(); nof_coef];
+    //d_vec[nof_coef..nof_coef * 2].copy_to_host(HostSlice::from_mut_slice(&mut h_scalars)).unwrap();
+    let g1_h_start = Instant::now();
     let commitment_h = msm_helper(&d_vec[nof_coef..nof_coef * 2], points_h, &g1_msm_config);
+    println!("G1 MSM H took: {:?}", g1_h_start.elapsed());
+
     println!("4 G1 MSMs took: {:?}", g1_start.elapsed());
 
     // let mut pi_a = [ProjectiveG1::zero(); 1];
@@ -383,7 +348,6 @@ pub fn groth16_verify_helper(
     let pi_c = deserialize_g1_affine(&proof.pi_c);
     
     let n_public = verification_key.n_public;
-    println!("SP: n_public: {}", n_public);
     
     let ic = verification_key.ic.clone();
 
@@ -408,11 +372,8 @@ pub fn groth16_verify_helper(
     let vk_beta_2 = verification_key.vk_beta_2.clone();
 
     // let first_thread = std::thread::spawn(move || {
-    println!("SP: computing parings");
     let first0 = pairing(&neg_pi_a.into(), &pi_b); //.unwrap();
-    println!("SP: first0: {:?}", first0);
     let first = first0.unwrap();
-    println!("SP: first: {:?}", first);
     // });
     //let second_thread = std::thread::spawn(move || {
     let second =    pairing(&cpub.into(), &vk_gamma_2).unwrap();
@@ -430,8 +391,7 @@ pub fn groth16_verify_helper(
     // let fourth = fourth_thread.join().unwrap();
 
     let result = Field::one() == first * second * third * fourth;
-    println!("SP:***********: result: {:?}", result);
-
+    println!("Verification result: {:?}", result);
 
     Ok(result)
 }
