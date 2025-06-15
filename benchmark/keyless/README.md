@@ -1,1 +1,0 @@
-Follow instructions in the Aptos repository https://github.com/aptos-labs/keyless-zk-proofs/tree/main/circuit
