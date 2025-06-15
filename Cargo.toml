@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "icicle_snark"
-# crate-type = ["staticlib"]
+name = "icicle_snark_ios"
+crate-type = ["staticlib"]
 
 [dependencies]
 icicle-core = { path = "../icicle/frontend/wrappers/rust/icicle-core"}

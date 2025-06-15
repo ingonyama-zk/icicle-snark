@@ -1,16 +1,10 @@
-use icicle_core::curve::Affine;
 use icicle_core::traits::FieldImpl;
 use memmap::{Mmap, MmapOptions};
 use serde::Serialize;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom};
-use std::mem;
 use std::path::Path;
-
-use crate::zkey::ZKeyHeader;
-use crate::{F, G1, G2};
-
-const GROTH16_PROTOCOL_ID: u32 = 1;
+use crate::F;
 
 #[derive(Clone, Debug)]
 pub struct Wtsn {
@@ -33,20 +27,11 @@ pub struct FileWrapper {
 }
 
 impl FileWrapper {
-    pub fn new(file: File) -> io::Result<Self> {
-        let mmap = unsafe { MmapOptions::new().map(&file)? };
-        Ok(Self {
-            file,
-            reading_section: None,
-            mmap,
-        })
-    }
-
     pub fn read_bin_file(
         file_name: &str,
         expected_type: &str,
         max_version: u32,
-    ) -> io::Result<(File, Vec<Vec<Section>>)> {
+    ) -> io::Result<(Self, Vec<Vec<Section>>)> {
         let mut file = match OpenOptions::new().read(true).write(true).open(file_name) {
             Ok(f) => f,
             Err(e) => {
@@ -113,7 +98,12 @@ impl FileWrapper {
             file.seek(SeekFrom::Current(hl as i64)).unwrap();
         }
 
-        Ok((file, sections))
+        let mmap = unsafe { MmapOptions::new().map(&file)? };
+        Ok((Self {
+            file,
+            reading_section: None,
+            mmap,
+        }, sections))
     }
 
     pub fn save_json_file<P: AsRef<Path>, T: Serialize>(
@@ -205,46 +195,5 @@ impl FileWrapper {
         let end = start + sections[id_section][0].size as usize;
 
         Ok(&self.mmap[start..end])
-    }
-
-    pub fn read_zkey_header(&mut self, sections: &[Vec<Section>]) -> io::Result<ZKeyHeader> {
-        self.start_read_unique_section(sections, 1).unwrap();
-        let protocol_id = self.read_u32_le().unwrap();
-        self.end_read_section(false).unwrap();
-        match protocol_id {
-            GROTH16_PROTOCOL_ID => ZKeyHeader::read_header_groth16(self, sections),
-            _ => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Protocol not supported",
-            )),
-        }
-    }
-
-    pub fn read_g1(&mut self) -> G1 {
-        let mut x = [0u8; 32];
-        self.file.read_exact(&mut x).unwrap();
-
-        let x: [u32; 8] = unsafe { mem::transmute(x) };
-
-        let mut y = [0u8; 32];
-        self.file.read_exact(&mut y).unwrap();
-
-        let y: [u32; 8] = unsafe { mem::transmute(y) };
-
-        Affine::from_limbs(x, y)
-    }
-
-    pub fn read_g2(&mut self) -> G2 {
-        let mut x = [0u8; 64];
-        self.file.read_exact(&mut x).unwrap();
-
-        let x: [u32; 16] = unsafe { std::mem::transmute(x) };
-
-        let mut y = [0u8; 64];
-        self.file.read_exact(&mut y).unwrap();
-
-        let y: [u32; 16] = unsafe { std::mem::transmute(y) };
-
-        Affine::from_limbs(x, y)
     }
 }

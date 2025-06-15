@@ -1,20 +1,20 @@
-mod cache;
-mod conversions;
+mod utils;
 mod file_wrapper;
-mod icicle_helper;
-mod proof_helper;
+mod groth16;
+mod icicle;
 mod zkey;
 
-use cache::VerificationKey;
-pub use cache::{CacheManager, ZKeyCache};
 use file_wrapper::FileWrapper;
 use icicle_bn254::curve::{CurveCfg, G2CurveCfg, ScalarField};
 use icicle_core::curve::{Affine, Projective};
-use icicle_core::ntt::{get_root_of_unity, initialize_domain, release_domain, NTTInitDomainConfig};
-use icicle_runtime::memory::{DeviceVec, HostOrDeviceSlice, HostSlice};
-use proof_helper::{groth16_prove_helper, groth16_verify_helper, Proof};
-use std::time::Instant;
-use serde_json;
+use groth16::{
+    prove::prove as groth16_prove,
+    // verify::VerificationKey
+};
+// use serde_json;
+
+use std::ffi::{c_char, c_ulonglong, CStr};
+use utils::string_to_ffi_buf;
 
 pub type F = ScalarField;
 pub type C1 = CurveCfg;
@@ -24,63 +24,114 @@ pub type G2 = Affine<C2>;
 pub type ProjectiveG1 = Projective<C1>;
 pub type ProjectiveG2 = Projective<C2>;
 
-fn try_load_and_set_backend_device(device_type: &str) {
-    #[cfg(not(feature = "mobile"))]
-    if device_type != "CPU" {
-        icicle_runtime::runtime::load_backend_from_env_or_default().unwrap();
-    }
-    let device = icicle_runtime::Device::new(device_type, 0 /* =device_id*/);
-    icicle_runtime::set_device(&device).unwrap();
+#[derive(Debug, Clone, Copy)]
+enum ProtocolId {
+    Groth16 = 1,
 }
 
-pub fn groth16_prove(
-    witness: &str,
-    zkey: &str,
-    proof: &str,
-    public: &str,
-    device: &str,
-    cache_manager: &mut CacheManager,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let start = Instant::now();
-    try_load_and_set_backend_device(device);
-
-    let (zkey_cache, update_domain) = cache_manager.get_or_compute(zkey, device)?;
-
-    if update_domain {
-        release_domain::<F>().unwrap();
+impl ProtocolId {
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            1 => Some(ProtocolId::Groth16),
+            _ => None,
+        }
     }
-    let domain: F = get_root_of_unity(zkey_cache.header.n_vars as u64);
-    let cfg = NTTInitDomainConfig::default();
-    initialize_domain(domain, &cfg).unwrap();
-
-    let (proof_data, public_signals) = groth16_prove_helper(witness, &zkey_cache)?;
-    FileWrapper::save_json_file(proof, &proof_data)?;
-    FileWrapper::save_json_file(public, &public_signals)?;
-
-    println!("proof took: {:?}", start.elapsed());
-
-    Ok(())
 }
 
-pub fn groth16_verify(
-    proof: &str,
-    public: &str,
-    vk: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let proof_str = std::fs::read_to_string(proof)?;
-    let proof: Proof = serde_json::from_str(&proof_str)?;
-
-    let public_str = std::fs::read_to_string(public)?;
-    let public: Vec<String> = serde_json::from_str(&public_str)?;
-
-    let vk_str = std::fs::read_to_string(vk)?;
-    let vk: VerificationKey = serde_json::from_str(&vk_str)?;
-
-    let pairing_result = groth16_verify_helper(&proof, &public, &vk)?;
-
-    if !pairing_result {
-        return Err("Verification failed".into());
-    }
-
-    Ok(())
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub enum DeviceType {
+    Cpu,
+    Metal,
+    CpuMetal,
 }
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub enum ProverResult {
+    Success,
+    Failure,
+}
+
+#[no_mangle]
+pub extern "C" fn prove(
+    witness_path: *const c_char,
+    zkey_path: *const c_char,
+    proof_path: *const c_char,
+    public_path: *const c_char,
+    error_msg: *mut c_char,
+    error_msg_maxsize: c_ulonglong,
+    device_type: DeviceType,
+) -> ProverResult {
+    unsafe {
+        println!("witness_path: {:?}", witness_path);
+        println!("zkey_path: {:?}", zkey_path);
+        println!("proof_path: {:?}", proof_path);
+        println!("public_path: {:?}", public_path);
+
+        let witness_path = CStr::from_ptr(witness_path).to_str().unwrap();
+        let zkey_path = CStr::from_ptr(zkey_path).to_str().unwrap();
+        let proof_path = CStr::from_ptr(proof_path).to_str().unwrap();
+        let public_path = CStr::from_ptr(public_path).to_str().unwrap();
+        
+        println!("witness_path: {}", witness_path);
+        println!("zkey_path: {}", zkey_path);
+        println!("proof_path: {}", proof_path);
+        println!("public_path: {}", public_path);
+        println!("device_type: {:?}", device_type);
+
+        let zkey = zkey::ZKey::load(zkey_path);
+        if zkey.is_err() {
+            let zkey_error = zkey.err().unwrap();
+            string_to_ffi_buf(zkey_error.to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
+            return ProverResult::Failure;
+        }
+        let zkey = zkey.unwrap();
+
+        match zkey.protocol_id {
+            ProtocolId::Groth16 => {
+                let prove_result = groth16_prove(witness_path, &zkey, device_type);
+                if prove_result.is_err() {
+                    string_to_ffi_buf(prove_result.err().unwrap().to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
+                    return ProverResult::Failure;
+                }
+                let (proof_data, public_signals) = prove_result.unwrap();
+                let proof_written = FileWrapper::save_json_file(proof_path, &proof_data);
+                if proof_written.is_err() {
+                    string_to_ffi_buf(proof_written.err().unwrap().to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
+                    return ProverResult::Failure;
+                }
+                let public_written = FileWrapper::save_json_file(public_path, &public_signals);
+                if public_written.is_err() {
+                    string_to_ffi_buf(public_written.err().unwrap().to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
+                    return ProverResult::Failure;
+                }
+                ProverResult::Success
+            },
+        }
+    }
+}
+
+// TODO: this needs to be updated.
+// pub fn verify(
+//     proof: &str,
+//     public: &str,
+//     vk: &str,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     let proof_str = std::fs::read_to_string(proof)?;
+//     let proof: Proof = serde_json::from_str(&proof_str)?;
+
+//     let public_str = std::fs::read_to_string(public)?;
+//     let public: Vec<String> = serde_json::from_str(&public_str)?;
+
+//     let vk_str = std::fs::read_to_string(vk)?;
+//     let vk: VerificationKey = serde_json::from_str(&vk_str)?;
+
+//     let pairing_result = groth16_verify_helper(&proof, &public, &vk)?;
+
+//     if !pairing_result {
+//         return Err("Verification failed".into());
+//     }
+
+//     Ok(())
+// }
