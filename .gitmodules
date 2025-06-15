@@ -1,0 +1,4 @@
+[submodule "vendor/icicle"]
+	path = vendor/icicle
+	url = https://github.com/ingonyama-zk/icicle.git
+	branch = stas/ios/port1

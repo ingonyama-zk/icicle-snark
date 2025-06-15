@@ -8,9 +8,9 @@ name = "icicle_snark_ios"
 crate-type = ["staticlib"]
 
 [dependencies]
-icicle-core = { path = "../icicle/frontend/wrappers/rust/icicle-core"}
-icicle-runtime = { path = "../icicle/frontend/wrappers/rust/icicle-runtime", features = ["metal_backend"]}
-icicle-bn254 = { path = "../icicle/frontend/wrappers/rust/icicle-curves/icicle-bn254", features = ["metal_backend"]}
+icicle-core = { path = "./vendor/icicle/wrappers/rust/icicle-core"}
+icicle-runtime = { path = "./vendor/icicle/wrappers/rust/icicle-runtime", features = ["metal_backend"]}
+icicle-bn254 = { path = "./vendor/icicle/wrappers/rust/icicle-curves/icicle-bn254", features = ["metal_backend"]}
 
 serde = { version="1.0.216", features = ["derive"] }
 serde_json = { version="1.0.125" } 
