@@ -50,7 +50,7 @@ pub fn verify(
   proof: &Proof,
   public: &[String],
   verification_key: &VerificationKey,
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> bool {
   let pi_a = deserialize_g1_affine(&proof.pi_a);
   let pi_b = deserialize_g2_affine(&proof.pi_b);
   let pi_c = deserialize_g1_affine(&proof.pi_c);
@@ -72,17 +72,10 @@ pub fn verify(
 
   let neg_pi_a = ProjectiveG1::zero() - pi_a.to_projective();
 
-  let vk_gamma_2 = verification_key.vk_gamma_2.clone();
-  let vk_delta_2 = verification_key.vk_delta_2.clone();
-  let vk_alpha_1 = verification_key.vk_alpha_1.clone();
-  let vk_beta_2 = verification_key.vk_beta_2.clone();
-
   let first = pairing(&neg_pi_a.into(), &pi_b).unwrap();
-  let second = pairing(&cpub.into(), &vk_gamma_2).unwrap();
-  let third = pairing(&pi_c, &vk_delta_2).unwrap();
-  let fourth = pairing(&vk_alpha_1, &vk_beta_2).unwrap();
+  let second = pairing(&cpub.into(), &verification_key.vk_gamma_2).unwrap();
+  let third = pairing(&pi_c, &verification_key.vk_delta_2).unwrap();
+  let fourth = pairing(&verification_key.vk_alpha_1, &verification_key.vk_beta_2).unwrap();
 
-  let result = PairingTargetField::one() == first * second * third * fourth;
-
-  Ok(result)
+  PairingTargetField::one() == first * second * third * fourth
 }

@@ -8,8 +8,8 @@ use file_wrapper::FileWrapper;
 use icicle_bn254::curve::{CurveCfg, G2CurveCfg, ScalarField};
 use icicle_core::curve::{Affine, Projective};
 use groth16::{
-    prove::prove as groth16_prove,
-    // verify::VerificationKey
+    prove::{prove as groth16_prove, Proof},
+    verify::VerificationKey
 };
 // use serde_json;
 
@@ -64,21 +64,10 @@ pub extern "C" fn prove(
     device_type: DeviceType,
 ) -> ProverResult {
     unsafe {
-        println!("witness_path: {:?}", witness_path);
-        println!("zkey_path: {:?}", zkey_path);
-        println!("proof_path: {:?}", proof_path);
-        println!("public_path: {:?}", public_path);
-
         let witness_path = CStr::from_ptr(witness_path).to_str().unwrap();
         let zkey_path = CStr::from_ptr(zkey_path).to_str().unwrap();
         let proof_path = CStr::from_ptr(proof_path).to_str().unwrap();
         let public_path = CStr::from_ptr(public_path).to_str().unwrap();
-        
-        println!("witness_path: {}", witness_path);
-        println!("zkey_path: {}", zkey_path);
-        println!("proof_path: {}", proof_path);
-        println!("public_path: {}", public_path);
-        println!("device_type: {:?}", device_type);
 
         let zkey = zkey::ZKey::load(zkey_path);
         if zkey.is_err() {
@@ -112,26 +101,41 @@ pub extern "C" fn prove(
     }
 }
 
-// TODO: this needs to be updated.
-// pub fn verify(
-//     proof: &str,
-//     public: &str,
-//     vk: &str,
-// ) -> Result<(), Box<dyn std::error::Error>> {
-//     let proof_str = std::fs::read_to_string(proof)?;
-//     let proof: Proof = serde_json::from_str(&proof_str)?;
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub enum VerifierResult {
+    Success,
+    Failure,
+}
 
-//     let public_str = std::fs::read_to_string(public)?;
-//     let public: Vec<String> = serde_json::from_str(&public_str)?;
+// TODO: this needs to be updated for more protocols
+#[no_mangle]
+pub extern "C" fn verify(
+    proof_path: *const c_char,
+    public_path: *const c_char,
+    vk_path: *const c_char,
+) -> VerifierResult {
+    unsafe {
+        let proof_path = CStr::from_ptr(proof_path).to_str().unwrap();
+        let proof_str = std::fs::read_to_string(proof_path).unwrap();
+        let proof: Proof = serde_json::from_str(&proof_str).unwrap();
+        
+        let public_path = CStr::from_ptr(public_path).to_str().unwrap();
+        let public_str = std::fs::read_to_string(public_path).unwrap();
+        let public: Vec<String> = serde_json::from_str(&public_str).unwrap();
+        
+        let vk_path = CStr::from_ptr(vk_path).to_str().unwrap();
+        let vk_str = std::fs::read_to_string(vk_path).unwrap();
+        let vk: VerificationKey = serde_json::from_str(&vk_str).unwrap();
 
-//     let vk_str = std::fs::read_to_string(vk)?;
-//     let vk: VerificationKey = serde_json::from_str(&vk_str)?;
+        let pairing_result = groth16::verify::verify(&proof, &public, &vk);
 
-//     let pairing_result = groth16_verify_helper(&proof, &public, &vk)?;
+        if !pairing_result {
+            return VerifierResult::Failure;
+        }
 
-//     if !pairing_result {
-//         return Err("Verification failed".into());
-//     }
+        println!("Verification successful");
 
-//     Ok(())
-// }
+        VerifierResult::Success
+    }
+}
