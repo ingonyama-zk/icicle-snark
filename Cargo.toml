@@ -23,22 +23,6 @@ clap = { version="4.5.23", features=["derive"] }
 [features]
 default=[]
 no-randomness=[]
-mobile=[]
-
-
-[target.aarch64-apple-ios]
-rustflags = [
-    "-C", "link-args=-static",             # Force static linking
-    "-C", "link-args=-Wl,-export_dynamic",  # Export all symbols
-    "-C", "link-args=-Wl,-force_load",     # Force load all symbols
-    "-C", "link-args=-Wl,-no_compact_unwind"  # Fix for macOS linker
-]
-
-[target.aarch64-apple-ios-sim]
-rustflags = [
-    "-C", "link-args=-static",             # Force static linking
-    "-C", "link-args=-Wl,-no_compact_unwind"  # Fix for macOS linker
-]
 
 [profile.release]
 lto = true

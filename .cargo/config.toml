@@ -1,18 +1,42 @@
-[target.aarch64-apple-darwin]
+[target.aarch64-apple-ios]
+linker = "clang"
+ar = "xcrun"
 rustflags = [
-    "-C", "link-arg=-lc++",
-    "-C", "link-arg=-Wl,-rpath,@loader_path",
-    "-C", "link-arg=-Wl,-rpath,@loader_path/deps/icicle/lib", # If libraries are in a 'lib' subdir
-    "-C", "link-arg=-Wl,-rpath,/Users/jeremy/ingonyama/inhouse/icicle-snark/target/debug", # Absolute path for debug libs
+    "-C", "link-args=-static",
+    "-C", "link-args=-Wl,-force_load",
+    "-C", "link-arg=-Wl,-syslibroot",
+    "-C", "link-args=-Wl,-all_load",
+    "-C", "link-args=-Wl,-no_compact_unwind",
+    "-C", "link-arg=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk",
+    "-C", "link-arg=-Wl,-miphoneos-version-min=18.0",
+    "-C", "link-arg=-framework", "-C", "link-arg=Foundation",
+    "-C", "link-arg=-framework", "-C", "link-arg=Metal",
+    "-C", "link-arg=-framework", "-C", "link-arg=MetalKit",
+    "-C", "link-arg=-framework", "-C", "link-arg=QuartzCore",
 ]
 
 [target.aarch64-apple-ios-sim]
+linker = "clang"
 rustflags = [
-    "-C", "link-arg=-lc++",
-    "-C", "link-arg=-fobjc-arc",
-    "-C", "link-arg=-isysroot",
-    "-C", "link-arg=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk",
-    "-C", "link-arg=-Wl,-rpath,@executable_path/Frameworks",
-    "-C", "link-arg=-Wl,-rpath,@loader_path",
-    "-C", "link-arg=-Wl,-rpath,@executable_path",
+    "-C", "link-args=-static",
+    "-C", "link-args=-Wl,-force_load",
+    "-C", "link-args=-Wl,-all_load",
+    "-C", "link-args=-Wl,-no_compact_unwind",
+    "-C", "link-arg=-framework", "-C", "link-arg=Foundation",
+    "-C", "link-arg=-framework", "-C", "link-arg=Metal",
+    "-C", "link-arg=-framework", "-C", "link-arg=MetalKit",
+    "-C", "link-arg=-framework", "-C", "link-arg=QuartzCore",
 ]
+
+[target.x86_64-apple-ios]
+rustflags = [
+    "-C", "link-args=-static",
+    "-C", "link-args=-Wl,-force_load",
+    "-C", "link-args=-Wl,-all_load",
+    "-C", "link-args=-Wl,-no_compact_unwind"
+] 
+
+[env]
+SDKROOT = "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk"
+IPHONEOS_DEPLOYMENT_TARGET = "18.0"
+MACOSX_DEPLOYMENT_TARGET = "11.0"
