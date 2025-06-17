@@ -226,7 +226,6 @@ fn commit_g1(d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), zkey: &
     stream.synchronize().unwrap();
     stream.destroy().unwrap();
 
-    println!("MSM {} input sizes - scalars: {}, points: {}", label, d_scalars.len(), points.len());
     icicle_msm(d_scalars, &d_points, commit_config, label)
 }
 
@@ -240,7 +239,6 @@ fn commit_g2(d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), zkey: &
     stream.synchronize().unwrap();
     stream.destroy().unwrap();
 
-    println!("MSM {} input sizes - scalars: {}, points: {}", label, d_scalars.len(), points.len());
     icicle_msm(d_scalars, &d_points, commit_config, label)
 }
 

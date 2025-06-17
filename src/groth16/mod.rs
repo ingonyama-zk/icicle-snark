@@ -20,9 +20,7 @@ pub fn compute_keys(
   let file_path = Path::new(&tmp_dir).join(format!("precomputed_{}_{}.bin", size, inc));
 
   if file_path.exists() {
-      let keys = load_from_binary_file(&file_path)?;
-      println!("Loaded keys from binary file");
-      return Ok(keys);
+      Ok(load_from_binary_file(&file_path)?)
   }
 
   let mut keys = Vec::with_capacity(size);

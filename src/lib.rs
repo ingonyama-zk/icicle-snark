@@ -134,8 +134,6 @@ pub extern "C" fn verify(
             return VerifierResult::Failure;
         }
 
-        println!("Verification successful");
-
         VerifierResult::Success
     }
 }

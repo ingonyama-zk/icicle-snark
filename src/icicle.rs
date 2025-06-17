@@ -10,8 +10,6 @@ use icicle_runtime::{
     memory::{DeviceSlice, HostSlice, HostOrDeviceSlice}
 };
 
-use std::time::Instant;
-
 pub fn icicle_initialize_domain(size: u64) {
     let root_of_unity: F = get_root_of_unity(size);
     let cfg = NTTInitDomainConfig::default();
@@ -28,9 +26,7 @@ where
         NTTDir::kForward
     };
 
-    let timer = Instant::now();
     ntt_inplace(vec, dir, cfg).unwrap();
-    println!("NTT took:\t\t{:?}", timer.elapsed());
 }
 
 pub fn icicle_msm<C: Curve + MSM<C>>(
@@ -41,9 +37,7 @@ pub fn icicle_msm<C: Curve + MSM<C>>(
 ) -> Projective<C>
 {
     let mut msm_result = vec![Projective::zero(); 1];
-    let timer = Instant::now();
     msm(scalars, points, &msm_config, HostSlice::from_mut_slice(&mut msm_result[..])).unwrap();
-    println!("{:?} MSM took:\t\t{:?}", msm_name, timer.elapsed());
 
     msm_result[0]
 }
