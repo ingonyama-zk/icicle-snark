@@ -41,9 +41,9 @@ impl ProtocolId {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub enum DeviceType {
+    CpuMetal,
     Cpu,
     Metal,
-    CpuMetal,
 }
 
 #[derive(Debug, Clone, Copy)]
