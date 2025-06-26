@@ -28,13 +28,15 @@ rustflags = [
     "-C", "link-arg=-framework", "-C", "link-arg=QuartzCore",
 ]
 
-[target.x86_64-apple-ios]
+[target.'cfg(target_os = "android")']
 rustflags = [
-    "-C", "link-args=-static",
-    "-C", "link-args=-Wl,-force_load",
-    "-C", "link-args=-Wl,-all_load",
-    "-C", "link-args=-Wl,-no_compact_unwind"
-] 
+  "-C", "link-arg=-Wl,--whole-archive",
+  "-C", "link-arg=-licicle_device",
+  "-C", "link-arg=-licicle_field_bn254",
+  "-C", "link-arg=-licicle_curve_bn254",
+  "-C", "link-arg=-licicle_hash",
+  "-C", "link-arg=-Wl,--no-whole-archive",
+]
 
 [env]
 SDKROOT = "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.2.sdk"
