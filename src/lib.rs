@@ -8,7 +8,7 @@ use file_wrapper::FileWrapper;
 use icicle_bn254::curve::{CurveCfg, G2CurveCfg, ScalarField};
 use icicle_core::curve::{Affine, Projective};
 use groth16::{
-    prove::{prove as groth16_prove, Proof},
+    prove::{prove as groth16_prove, parallel_prove as groth16_parallel_prove, Proof},
     verify::VerificationKey
 };
 // use serde_json;
@@ -34,6 +34,15 @@ impl ProtocolId {
         match value {
             1 => Some(ProtocolId::Groth16),
             _ => None,
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn free_parallel_results(results: *mut ProverResult) {
+    unsafe {
+        if !results.is_null() {
+            let _ = Box::from_raw(results);
         }
     }
 }
@@ -97,6 +106,62 @@ pub extern "C" fn prove(
                 }
                 ProverResult::Success
             },
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn parallel_prove(
+    witness_paths: *const *const c_char,
+    zkey_path: *const c_char,
+    proof_paths: *const *const c_char,
+    public_paths: *const *const c_char,
+    num_proofs: c_ulonglong,
+    error_msg: *mut c_char,
+    error_msg_maxsize: c_ulonglong,
+    device_type: DeviceType,
+) -> *mut ProverResult {
+    unsafe {
+        // Convert C arrays to Rust vectors
+        let mut witness_paths_vec = Vec::new();
+        let mut proof_paths_vec = Vec::new();
+        let mut public_paths_vec = Vec::new();
+
+        // Get the single zkey path
+        let zkey_path_str = CStr::from_ptr(zkey_path).to_str().unwrap();
+
+        for i in 0..num_proofs {
+            let witness_path = CStr::from_ptr(*witness_paths.offset(i as isize)).to_str().unwrap();
+            let proof_path = CStr::from_ptr(*proof_paths.offset(i as isize)).to_str().unwrap();
+            let public_path = CStr::from_ptr(*public_paths.offset(i as isize)).to_str().unwrap();
+
+            witness_paths_vec.push(witness_path.to_string());
+            proof_paths_vec.push(proof_path.to_string());
+            public_paths_vec.push(public_path.to_string());
+        }
+
+        let parallel_result = groth16_parallel_prove(
+            &witness_paths_vec,
+            zkey_path_str,
+            &proof_paths_vec,
+            &public_paths_vec,
+            device_type,
+        );
+
+        match parallel_result {
+            Ok(results) => {
+                // Convert results to C array
+                let mut c_results = Vec::with_capacity(results.len());
+                for result in results {
+                    c_results.push(result);
+                }
+                let boxed_results = c_results.into_boxed_slice();
+                Box::into_raw(boxed_results) as *mut ProverResult
+            }
+            Err(e) => {
+                string_to_ffi_buf(e.to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
+                std::ptr::null_mut()
+            }
         }
     }
 }
