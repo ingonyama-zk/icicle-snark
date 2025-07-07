@@ -6,7 +6,7 @@ use crate::{
 };
 use icicle_bn254::curve::ScalarField;
 use icicle_core::{
-    msm::{MSMConfig}, 
+    msm::{MSMConfig, msm}, 
     traits::{FieldImpl, MontgomeryConvertible}, vec_ops::{mul_scalars, sub_scalars, VecOpsConfig}, ntt::{NTTConfig, release_domain}
 };
 use icicle_runtime::{
@@ -215,6 +215,202 @@ fn compute_h(d_vec: &mut DeviceVec<ScalarField>, coset_gen: Option<ScalarField>,
     d_h
 }
 
+fn compute_h_batched(
+    d_vecs: &mut [DeviceVec<ScalarField>], 
+    coset_gen: Option<ScalarField>, 
+    nof_coef: usize, 
+    keys: Option<&Vec<F>>, 
+    stream: &IcicleStream,
+    batch_size: usize
+) -> Vec<DeviceVec<ScalarField>> {
+    
+    // Verify all d_vecs have the same size
+    let expected_size = d_vecs[0].len();
+    for (i, d_vec) in d_vecs.iter().enumerate() {
+        if d_vec.len() != expected_size {
+            panic!("d_vecs[{}] has size {} but expected {}", i, d_vec.len(), expected_size);
+        }
+    }
+    
+    println!("compute_h_batched: batch_size={}, individual_size={}, total_size={}, domain_size={}", 
+             batch_size, expected_size, expected_size * batch_size, nof_coef);
+    
+    // Concatenate all d_vecs into a single batch for NTT
+    let total_size = expected_size * batch_size;
+    let mut batched_d_vec = DeviceVec::device_malloc_async(total_size, stream).unwrap();
+    
+    // Copy all d_vecs into the batched array
+    for (i, d_vec) in d_vecs.iter().enumerate() {
+        let start_idx = i * d_vec.len();
+        let end_idx = start_idx + d_vec.len();
+        batched_d_vec[start_idx..end_idx].copy(&d_vec[..]).unwrap();
+    }
+    
+    // Configure NTT for batch processing
+    let mut ntt_cfg = NTTConfig::default();
+    ntt_cfg.stream_handle = stream.handle;
+    ntt_cfg.is_async = true;
+    ntt_cfg.batch_size = (3 * batch_size) as i32; // 3 internal sections per vector * number of vectors
+    ntt_cfg.columns_batch = false; // Process as separate NTTs, not matrix columns
+    
+    // Forward NTT (inverse = true)
+    icicle_ntt(&mut batched_d_vec, true, &ntt_cfg);
+
+    let batched_d_vec_copy = unsafe {
+        DeviceSlice::from_mut_slice(std::slice::from_raw_parts_mut(
+            batched_d_vec.as_mut_ptr(),
+            batched_d_vec.len(),
+        ))
+    };
+
+    let mut cfg: VecOpsConfig = VecOpsConfig::default();
+    cfg.stream_handle = stream.handle;
+    
+    if let Some(keys) = keys {
+        let mut d_keys = DeviceVec::device_malloc_async(keys.len(), stream).unwrap();
+        d_keys.copy_from_host_async(HostSlice::from_slice(&keys), stream).unwrap();
+
+        // Apply keys to each batch element
+        for batch_idx in 0..batch_size {
+            let start_idx = batch_idx * d_vecs[0].len();
+            let end_idx = start_idx + d_vecs[0].len();
+            
+            mul_scalars(
+                &batched_d_vec[start_idx..start_idx + nof_coef],
+                &d_keys[..],
+                &mut batched_d_vec_copy[start_idx..start_idx + nof_coef],
+                &cfg,
+            ).unwrap();
+            mul_scalars(
+                &batched_d_vec[start_idx + nof_coef..start_idx + nof_coef * 2],
+                &d_keys[..],
+                &mut batched_d_vec_copy[start_idx + nof_coef..start_idx + 2 * nof_coef],
+                &cfg,
+            ).unwrap();
+            mul_scalars(
+                &batched_d_vec[start_idx + nof_coef * 2..end_idx],
+                &d_keys[..],
+                &mut batched_d_vec_copy[start_idx + nof_coef * 2..end_idx],
+                &cfg,
+            ).unwrap();
+        }
+    } else if let Some(coset_gen) = coset_gen {
+        ntt_cfg.coset_gen = coset_gen;
+    } else {
+        panic!("[compute_h_batched]: Neither coset_gen nor keys provided");
+    }
+    
+    // Inverse NTT (inverse = false)
+    icicle_ntt(&mut batched_d_vec, false, &ntt_cfg);
+
+    // Process each batch element: L * R - O
+    let mut d_h_results = Vec::with_capacity(batch_size);
+    for batch_idx in 0..batch_size {
+        let start_idx = batch_idx * d_vecs[0].len();
+        
+        mul_scalars(
+            &batched_d_vec[start_idx..start_idx + nof_coef], 
+            &batched_d_vec[start_idx + nof_coef..start_idx + nof_coef * 2], 
+            &mut batched_d_vec_copy[start_idx..start_idx + nof_coef], 
+            &cfg
+        ).unwrap();
+        
+        let mut d_h = DeviceVec::device_malloc(nof_coef).unwrap();
+        sub_scalars(
+            &batched_d_vec[start_idx..start_idx + nof_coef], 
+            &batched_d_vec[start_idx + nof_coef * 2..start_idx + nof_coef * 3], 
+            &mut d_h, 
+            &cfg
+        ).unwrap();
+        d_h_results.push(d_h);
+    }
+    
+    let _ = release_domain::<ScalarField>();
+    stream.synchronize().unwrap();
+    d_h_results
+}
+
+fn commitments(scalars: &[F], zkey: &ZKey, n_public: usize, stream: &IcicleStream) -> (ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1) {
+    let host_scalars = HostSlice::from_slice(scalars);
+    let mut msm_config = MSMConfig::default();
+    msm_config.is_async = false;
+    msm_config.c = 14;
+    
+    let a = commit_g1(&host_scalars[..], zkey, 5, "a", &msm_config, stream);
+    let b1 = commit_g1(&host_scalars[..], zkey, 6, "b1", &msm_config, stream);
+    let b = commit_g2(&host_scalars[..], zkey, 7, "b", &msm_config, stream);
+    let c = commit_g1(&host_scalars[n_public+1..], zkey, 8, "c", &msm_config, stream);
+
+    (a, b1, b, c)
+}
+
+fn commitments_batched(
+    scalars_array: &[Vec<F>], 
+    zkey: &ZKey, 
+    n_public: usize, 
+    stream: &IcicleStream,
+    batch_size: usize
+) -> Vec<(ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1)> {
+    
+    println!("commitments_batched: batch_size={}, n_public={}", batch_size, n_public);
+    println!("commitments_batched: scalars_array lengths: {:?}", scalars_array.iter().map(|s| s.len()).collect::<Vec<_>>());
+    
+    // Configure MSM for batch processing
+    let mut msm_config = MSMConfig::default();
+    msm_config.is_async = false;
+    msm_config.c = 14;
+    msm_config.batch_size = batch_size as i32;
+    msm_config.are_points_shared_in_batch = true; // All proofs use the same zkey
+    
+    // Concatenate all scalars for batch MSM
+    let total_scalars: Vec<F> = scalars_array.iter().flat_map(|s| s.iter()).cloned().collect();
+    let host_scalars = HostSlice::from_slice(&total_scalars);
+    
+    println!("commitments_batched: total_scalars length: {}", total_scalars.len());
+    
+    // Batch commit for pi_a
+    println!("commitments_batched: Starting pi_a MSM");
+    let mut pi_a_results = vec![ProjectiveG1::zero(); batch_size];
+    let pi_a_slice = HostSlice::from_mut_slice(&mut pi_a_results);
+    commit_g1_batched(&host_scalars[..], zkey, 5, "a", &msm_config, stream, pi_a_slice);
+    println!("commitments_batched: Completed pi_a MSM");
+    
+    // Batch commit for pi_b1
+    println!("commitments_batched: Starting pi_b1 MSM");
+    let mut pi_b1_results = vec![ProjectiveG1::zero(); batch_size];
+    let pi_b1_slice = HostSlice::from_mut_slice(&mut pi_b1_results);
+    commit_g1_batched(&host_scalars[..], zkey, 6, "b1", &msm_config, stream, pi_b1_slice);
+    println!("commitments_batched: Completed pi_b1 MSM");
+    
+    // Batch commit for pi_b (G2)
+    println!("commitments_batched: Starting pi_b MSM");
+    let mut pi_b_results = vec![ProjectiveG2::zero(); batch_size];
+    let pi_b_slice = HostSlice::from_mut_slice(&mut pi_b_results);
+    commit_g2_batched(&host_scalars[..], zkey, 7, "b", &msm_config, stream, pi_b_slice);
+    println!("commitments_batched: Completed pi_b MSM");
+    
+    // Batch commit for pi_c (only private inputs)
+    let private_scalars: Vec<F> = scalars_array.iter()
+        .flat_map(|s| s[n_public+1..].iter())
+        .cloned()
+        .collect();
+    let host_private_scalars = HostSlice::from_slice(&private_scalars);
+    println!("commitments_batched: private_scalars length: {}", private_scalars.len());
+    println!("commitments_batched: Starting pi_c MSM");
+    let mut pi_c_results = vec![ProjectiveG1::zero(); batch_size];
+    let pi_c_slice = HostSlice::from_mut_slice(&mut pi_c_results);
+    commit_g1_batched(&host_private_scalars[..], zkey, 8, "c", &msm_config, stream, pi_c_slice);
+    println!("commitments_batched: Completed pi_c MSM");
+    
+    // Combine results
+    (0..batch_size).map(|i| (
+        pi_a_results[i],
+        pi_b1_results[i], 
+        pi_b_results[i],
+        pi_c_results[i]
+    )).collect()
+}
+
 fn commit_g1(d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), zkey: &ZKey, section_idx: usize, label: &str, commit_config: &MSMConfig, stream: &IcicleStream) -> ProjectiveG1 {
     let points_raw = from_u8(&zkey.file.read_section(&zkey.sections, section_idx).unwrap());
     let points = HostSlice::from_slice(&points_raw);
@@ -238,18 +434,52 @@ fn commit_g2(d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), zkey: &
     // stream.synchronize().unwrap();
 }
 
-fn commitments(scalars: &[F], zkey: &ZKey, n_public: usize, stream: &IcicleStream) -> (ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1) {
-    let host_scalars = HostSlice::from_slice(scalars);
-    let mut msm_config = MSMConfig::default();
-    msm_config.is_async = false;
-    msm_config.c = 14;
+fn commit_g1_batched(
+    d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), 
+    zkey: &ZKey, 
+    section_idx: usize, 
+    _label: &str, 
+    commit_config: &MSMConfig, 
+    stream: &IcicleStream,
+    results: &mut (impl HostOrDeviceSlice<ProjectiveG1> + ?Sized)
+) {
+    println!("commit_g1_batched: section_idx={}, d_scalars len={}, points len={}, batch_size={}", 
+             section_idx, d_scalars.len(), commit_config.batch_size, commit_config.batch_size);
     
-    let a = commit_g1(&host_scalars[..], zkey, 5, "a", &msm_config, stream);
-    let b1 = commit_g1(&host_scalars[..], zkey, 6, "b1", &msm_config, stream);
-    let b = commit_g2(&host_scalars[..], zkey, 7, "b", &msm_config, stream);
-    let c = commit_g1(&host_scalars[n_public+1..], zkey, 8, "c", &msm_config, stream);
+    let points_raw = from_u8(&zkey.file.read_section(&zkey.sections, section_idx).unwrap());
+    let points = HostSlice::from_slice(&points_raw);
+    let mut d_points = DeviceVec::device_malloc_async(points.len(), stream).unwrap();
+    d_points.copy_from_host_async(points, stream).unwrap();
+    G1::from_mont(&mut d_points, stream);
+    stream.synchronize().unwrap();
 
-    (a, b1, b, c)
+    // Use Icicle's native batch MSM
+    icicle_core::msm::msm(d_scalars, &d_points, commit_config, results).unwrap();
+    println!("commit_g1_batched: MSM completed for section {}", section_idx);
+}
+
+fn commit_g2_batched(
+    d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), 
+    zkey: &ZKey, 
+    section_idx: usize, 
+    _label: &str, 
+    commit_config: &MSMConfig, 
+    stream: &IcicleStream,
+    results: &mut (impl HostOrDeviceSlice<ProjectiveG2> + ?Sized)
+) {
+    println!("commit_g2_batched: section_idx={}, d_scalars len={}, points len={}, batch_size={}", 
+             section_idx, d_scalars.len(), commit_config.batch_size, commit_config.batch_size);
+    
+    let points_raw = from_u8(&zkey.file.read_section(&zkey.sections, section_idx).unwrap());
+    let points = HostSlice::from_slice(&points_raw);
+    let mut d_points = DeviceVec::device_malloc_async(points.len(), stream).unwrap();
+    d_points.copy_from_host_async(points, stream).unwrap();
+    G2::from_mont(&mut d_points, stream);
+    stream.synchronize().unwrap();
+
+    // Use Icicle's native batch MSM
+    icicle_core::msm::msm(d_scalars, &d_points, commit_config, results).unwrap();
+    println!("commit_g2_batched: MSM completed for section {}", section_idx);
 }
 
 fn prove_cpu(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1) {
@@ -282,6 +512,7 @@ fn prove_metal_cpu(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (P
         let mut stream = IcicleStream::create().unwrap();
         let mut d_vec = construct_r1cs(scalars, zkey, header, &stream);
         // Arbitrary coset is not supported in METAL yet
+        // SP: NTT inside
         let d_h = compute_h(&mut d_vec, None, domain_size, Some(&keys), &stream); 
         
 
@@ -300,6 +531,133 @@ fn prove_metal_cpu(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (P
 fn prove_metal(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1) {
     // TODO: Implement full metal proof
     prove_metal_cpu(scalars, zkey, header)
+}
+
+fn prove_cpu_batched(
+    scalars_array: &[Vec<F>], 
+    zkey: &ZKey, 
+    header: &Groth16ZKeyHeader,
+    batch_size: usize
+) -> Vec<(ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1)> {
+    let coset_gen = F::from_hex(W[header.power + 1]);
+    let stream = IcicleStream::create().unwrap();
+    
+    // Batch commitments
+    let commitments_results = commitments_batched(scalars_array, zkey, header.n_public, &stream, batch_size);
+    
+    // Batch R1CS construction and compute_h
+    let mut d_vecs: Vec<DeviceVec<ScalarField>> = Vec::with_capacity(scalars_array.len());
+    for scalars in scalars_array {
+        let d_vec = construct_r1cs(scalars, zkey, header, &stream);
+        d_vecs.push(d_vec);
+    }
+    
+    let d_h_results = compute_h_batched(&mut d_vecs, Some(coset_gen), header.domain_size, None, &stream, batch_size);
+    
+    // Batch pi_h computation
+    let mut msm_config = MSMConfig::default();
+    msm_config.is_async = false;
+    msm_config.c = 14;
+    msm_config.batch_size = scalars_array.len() as i32;
+    msm_config.are_points_shared_in_batch = true;
+    
+    let mut pi_h_results = vec![ProjectiveG1::zero(); scalars_array.len()];
+    let pi_h_slice = HostSlice::from_mut_slice(&mut pi_h_results);
+    
+    // Concatenate all d_h results for batch MSM
+    let total_d_h_size: usize = d_h_results.iter().map(|d_h| d_h.len()).sum();
+    let mut batched_d_h = DeviceVec::device_malloc_async(total_d_h_size, &stream).unwrap();
+    
+    let mut offset = 0;
+    for d_h in &d_h_results {
+        let len = d_h.len();
+        batched_d_h[offset..offset + len].copy(&d_h[..]).unwrap();
+        offset += len;
+    }
+    
+    commit_g1_batched(&batched_d_h, zkey, 9, "h", &msm_config, &stream, pi_h_slice);
+    
+    stream.synchronize().unwrap();
+
+    // Combine all results
+    commitments_results.into_iter()
+        .zip(pi_h_results.into_iter())
+        .map(|((pi_a, pi_b1, pi_b, pi_c), pi_h)| (pi_a, pi_b1, pi_b, pi_c, pi_h))
+        .collect()
+}
+
+fn prove_metal_cpu_batched(
+    scalars_array: &[Vec<F>], 
+    zkey: &ZKey, 
+    header: &Groth16ZKeyHeader,
+    batch_size: usize
+) -> Vec<(ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1)> {
+    std::thread::scope(|s| {
+        let cpu_thread = s.spawn(|| {
+            let device = Device::new("CPU", 0);
+            icicle_runtime::set_device(&device).unwrap();
+            let cpu_stream = IcicleStream::create().unwrap();
+            commitments_batched(scalars_array, zkey, header.n_public, &cpu_stream, batch_size)
+        });
+
+        let domain_size = header.domain_size;
+        let keys = super::compute_keys(F::one(), F::from_hex(W[header.power + 1]), domain_size).unwrap();
+        let mut stream = IcicleStream::create().unwrap();
+        
+        // Batch R1CS construction and compute_h
+        println!("Building R1CS");
+        let mut d_vecs: Vec<DeviceVec<ScalarField>> = Vec::with_capacity(scalars_array.len());
+        println!("scalars_array.len(): {}", scalars_array.len());
+        for scalars in scalars_array {
+            println!("scalars.len(): {}", scalars.len());
+            let d_vec = construct_r1cs(scalars, zkey, header, &stream);
+            d_vecs.push(d_vec);
+        }
+        
+        let d_h_results = compute_h_batched(&mut d_vecs, None, domain_size, Some(&keys), &stream, batch_size);
+
+        let mut msm_config = MSMConfig::default();
+        msm_config.stream_handle = stream.handle;
+        msm_config.is_async = false;
+        msm_config.batch_size = scalars_array.len() as i32;
+        msm_config.are_points_shared_in_batch = true;
+        
+        let mut pi_h_results = vec![ProjectiveG1::zero(); scalars_array.len()];
+        let pi_h_slice = HostSlice::from_mut_slice(&mut pi_h_results);
+        
+        // Concatenate all d_h results for batch MSM
+        let total_d_h_size: usize = d_h_results.iter().map(|d_h| d_h.len()).sum();
+        let mut batched_d_h = DeviceVec::device_malloc_async(total_d_h_size, &stream).unwrap();
+        
+        let mut offset = 0;
+        for d_h in &d_h_results {
+            let len = d_h.len();
+            batched_d_h[offset..offset + len].copy(&d_h[..]).unwrap();
+            offset += len;
+        }
+        
+        commit_g1_batched(&batched_d_h, zkey, 9, "h", &msm_config, &stream, pi_h_slice);
+
+        let commitments_results = cpu_thread.join().unwrap();
+        stream.synchronize().unwrap();
+        stream.destroy().unwrap();
+        
+        // Combine all results
+        commitments_results.into_iter()
+            .zip(pi_h_results.into_iter())
+            .map(|((pi_a, pi_b1, pi_b, pi_c), pi_h)| (pi_a, pi_b1, pi_b, pi_c, pi_h))
+            .collect()
+    })
+}
+
+fn prove_metal_batched(
+    scalars_array: &[Vec<F>], 
+    zkey: &ZKey, 
+    header: &Groth16ZKeyHeader,
+    batch_size: usize
+) -> Vec<(ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1)> {
+    // TODO: Implement full metal proof
+    prove_metal_cpu_batched(scalars_array, zkey, header, batch_size)
 }
 
 pub fn prove(
@@ -326,7 +684,7 @@ pub fn prove(
     }
     
     let buff_witness = wtns_file.read_section(&sections_wtns[..], 2).unwrap();
-    let scalars = from_u8(buff_witness);
+    let scalars = from_u8::<F>(buff_witness);
     
     set_device(device_type);
     icicle_initialize_domain(header.domain_size as u64);
@@ -388,6 +746,8 @@ pub fn prove(
     Ok((serde_json::json!(proof), serde_json::json!(public_signals)))
 }
 
+
+
 pub fn parallel_prove(
     witness_paths: &[String],
     zkey_path: &str,
@@ -400,12 +760,13 @@ pub fn parallel_prove(
         return Err("All input arrays must have the same length".into());
     }
 
-    println!("Parallel proof generation started");
+    println!("Batched proof generation started");
     println!("Witness paths: {:?}", witness_paths);
     println!("Proof paths: {:?}", proof_paths);
     println!("Public paths: {:?}", public_paths);
     println!("Zkey path: {:?}", zkey_path);
     println!("Device type: {:?}", device_type);
+    println!("Batch size: {}", witness_paths.len());
 
     // Load zkey once for all proofs
     let zkey = match ZKey::load(zkey_path) {
@@ -413,115 +774,102 @@ pub fn parallel_prove(
         Err(_) => return Err("Failed to load zkey file".into()),
     };
 
-    let results: Vec<ProverResult> = witness_paths
-        .par_iter()
-        .zip(proof_paths.par_iter())
-        .zip(public_paths.par_iter())
-        .map(|((witness_path, proof_path), public_path)| {
+    // Load all witnesses and convert to scalars
+    let mut scalars_array: Vec<Vec<F>> = Vec::with_capacity(witness_paths.len());
+    
+    for witness_path in witness_paths {
+        let (mut wtns_file, sections_wtns) = match FileWrapper::read_bin_file(witness_path, "wtns", 2) {
+            Ok(result) => result,
+            Err(_) => return Ok(vec![ProverResult::Failure; witness_paths.len()]),
+        };
 
-            // Load witness
-            let (mut wtns_file, sections_wtns) = match FileWrapper::read_bin_file(witness_path, "wtns", 2) {
-                Ok(result) => result,
-                Err(_) => return ProverResult::Failure,
-            };
+        let wtns = match wtns_file.read_wtns_header(&sections_wtns[..]) {
+            Ok(wtns) => wtns,
+            Err(_) => return Ok(vec![ProverResult::Failure; witness_paths.len()]),
+        };
 
-            let wtns = match wtns_file.read_wtns_header(&sections_wtns[..]) {
-                Ok(wtns) => wtns,
-                Err(_) => return ProverResult::Failure,
-            };
+        let ZKeyHeader::Groth16(header) = &zkey.header;
+        if !F::eq(&header.r, &wtns.q) || wtns.n_witness != header.n_vars {
+            return Ok(vec![ProverResult::Failure; witness_paths.len()]);
+        }
 
-            let ZKeyHeader::Groth16(header) = &zkey.header;
-            
-            if !F::eq(&header.r, &wtns.q) {
-                return ProverResult::Failure;
-            }
-            
-            if wtns.n_witness != header.n_vars {
-                return ProverResult::Failure;
-            }
-            
-            let buff_witness = match wtns_file.read_section(&sections_wtns[..], 2) {
-                Ok(buff) => buff,
-                Err(_) => return ProverResult::Failure,
-            };
-            let scalars = from_u8(buff_witness);
-            
-            // Set device and initialize domain for this thread
-            set_device(device_type);
-            icicle_initialize_domain(header.domain_size as u64);
+        let buff_witness = match wtns_file.read_section(&sections_wtns[..], 2) {
+            Ok(buff) => buff,
+            Err(_) => return Ok(vec![ProverResult::Failure; witness_paths.len()]),
+        };
 
-            // Generate proof
-            let prove_result = match device_type {
-                DeviceType::Cpu => {
-                    prove_cpu(scalars, &zkey, &header)
-                }
-                DeviceType::CpuMetal => {
-                    prove_metal_cpu(scalars, &zkey, &header)
-                }
-                DeviceType::Metal => {
-                    prove_metal(scalars, &zkey, &header)
-                }
-            };
+        scalars_array.push(from_u8::<F>(buff_witness).to_vec());
+    }
 
-            let (pi_a, pi_b1, pi_b, pi_c, pi_h) = prove_result;
+    // Set device and initialize domain once for all proofs
+    set_device(device_type);
+    let ZKeyHeader::Groth16(header) = &zkey.header;
+    icicle_initialize_domain(header.domain_size as u64);
 
-            #[cfg(not(feature = "no-randomness"))]
-            let (pi_a, pi_b, pi_c) = {
-                let rs = ScalarCfg::generate_random(2);
-                let r = rs[0];
-                let s = rs[1];
+    // Generate all proofs in a single batch using Icicle's native batch processing
+    let batch_size = witness_paths.len();
+    let prove_results = match device_type {
+        DeviceType::Cpu => {
+            prove_cpu_batched(&scalars_array, &zkey, &header, batch_size)
+        }
+        DeviceType::CpuMetal => {
+            prove_metal_cpu_batched(&scalars_array, &zkey, &header, batch_size)
+        }
+        DeviceType::Metal => {
+            prove_metal_batched(&scalars_array, &zkey, &header, batch_size)
+        }
+    };
 
-                let pi_a = pi_a + header.vk_alpha_1 + header.vk_delta_1 * r;
-                let pi_b = pi_b + header.vk_beta_2 + header.vk_delta_2 * s;
-                let pi_b1 = pi_b1 + header.vk_beta_1 + header.vk_delta_1 * s;
-                let pi_c = pi_c + pi_h + pi_a * s + pi_b1 * r - header.vk_delta_1 * r * s;
+    // Process results and save files
+    let mut results = Vec::with_capacity(witness_paths.len());
+    
+    for (i, (pi_a, pi_b1, pi_b, pi_c, pi_h)) in prove_results.into_iter().enumerate() {
+        #[cfg(not(feature = "no-randomness"))]
+        let (pi_a, pi_b, pi_c) = {
+            let rs = ScalarCfg::generate_random(2);
+            let r = rs[0];
+            let s = rs[1];
+            let pi_a = pi_a + header.vk_alpha_1 + header.vk_delta_1 * r;
+            let pi_b = pi_b + header.vk_beta_2 + header.vk_delta_2 * s;
+            let pi_b1 = pi_b1 + header.vk_beta_1 + header.vk_delta_1 * s;
+            let pi_c = pi_c + pi_h + pi_a * s + pi_b1 * r - header.vk_delta_1 * r * s;
+            (pi_a, pi_b, pi_c)
+        };
+        #[cfg(feature = "no-randomness")]
+        let (pi_a, pi_b, pi_c) = {
+            let pi_a = pi_a + zkey.vk_alpha_1 + zkey.vk_delta_1;
+            let pi_b = pi_b + zkey.vk_beta_2 + zkey.vk_delta_2;
+            let pi_b1 = pi_b1 + zkey.vk_beta_1 + zkey.vk_delta_1;
+            let pi_c = pi_c + pi_h + pi_a + pi_b1 - zkey.vk_delta_1;
+            (pi_a, pi_b, pi_c)
+        };
 
-                (pi_a, pi_b, pi_c)
-            };
-            #[cfg(feature = "no-randomness")]
-            let (pi_a, pi_b, pi_c) = {
-                let pi_a = pi_a + zkey.vk_alpha_1 + zkey.vk_delta_1;
-                let pi_b = pi_b + zkey.vk_beta_2 + zkey.vk_delta_2;
-                let pi_b1 = pi_b1 + zkey.vk_beta_1 + zkey.vk_delta_1;
-                let pi_c = pi_c + pi_h + pi_a + pi_b1 - zkey.vk_delta_1;
+        // Extract public signals from the scalars array
+        let mut public_signals = Vec::with_capacity(header.n_public);
+        for j in 1..=header.n_public {
+            let scalar_bytes: BigUint = BigUint::from_bytes_le(&scalars_array[i][j].to_bytes_le());
+            public_signals.push(scalar_bytes.to_str_radix(10));
+        }
 
-                (pi_a, pi_b, pi_c)
-            };
+        let proof = Proof {
+            pi_a: serialize_g1_affine(pi_a.into()),
+            pi_b: serialize_g2_affine(pi_b.into()),
+            pi_c: serialize_g1_affine(pi_c.into()),
+            protocol: "groth16".to_string(),
+            curve: "bn128".to_string(),
+        };
 
-            // Extract public signals
-            let mut public_signals = Vec::with_capacity(header.n_public);
-            let field_size = ScalarField::zero().to_bytes_le().len();
-
-            for i in 1..=header.n_public {
-                let start = i * field_size;
-                let end = start + field_size;
-                let b = &buff_witness[start..end];
-                let scalar_bytes: BigUint = BigUint::from_bytes_le(b);
-                public_signals.push(scalar_bytes.to_str_radix(10));
-            }
-
-            // Create proof
-            let proof = Proof {
-                pi_a: serialize_g1_affine(pi_a.into()),
-                pi_b: serialize_g2_affine(pi_b.into()),
-                pi_c: serialize_g1_affine(pi_c.into()),
-                protocol: "groth16".to_string(),
-                curve: "bn128".to_string(),
-            };
-
-            // Save proof and public signals
-            if FileWrapper::save_json_file(proof_path, &proof).is_err() {
-                return ProverResult::Failure;
-            }
-            if FileWrapper::save_json_file(public_path, &public_signals).is_err() {
-                return ProverResult::Failure;
-            }
-
+        let result = if FileWrapper::save_json_file(&proof_paths[i], &proof).is_err() ||
+                       FileWrapper::save_json_file(&public_paths[i], &public_signals).is_err() {
+            ProverResult::Failure
+        } else {
             ProverResult::Success
-        })
-        .collect();
+        };
+        
+        results.push(result);
+    }
 
+    println!("Batched proof generation completed");
     Ok(results)
 }
-
 
