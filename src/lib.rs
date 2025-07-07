@@ -39,10 +39,11 @@ impl ProtocolId {
 }
 
 #[no_mangle]
-pub extern "C" fn free_parallel_results(results: *mut ProverResult) {
+pub extern "C" fn free_parallel_results(results: *mut ProverResultInt, count: usize) {
     unsafe {
         if !results.is_null() {
-            let _ = Box::from_raw(results);
+            // Convert back to Vec and let it drop
+            let _ = Vec::from_raw_parts(results, count, count);
         }
     }
 }
@@ -58,8 +59,17 @@ pub enum DeviceType {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub enum ProverResult {
-    Success,
-    Failure,
+    Success = 0,
+    Failure = 1,
+}
+
+// Use i64 to ensure 8-byte size to match NSInteger
+pub type ProverResultInt = i64;
+
+#[repr(C)]
+pub struct ParallelResults {
+    pub results: *mut ProverResult,
+    pub count: usize,
 }
 
 #[no_mangle]
@@ -120,7 +130,8 @@ pub extern "C" fn parallel_prove(
     error_msg: *mut c_char,
     error_msg_maxsize: c_ulonglong,
     device_type: DeviceType,
-) -> *mut ProverResult {
+) -> *mut ProverResultInt {
+    println!("[RUST] parallel_prove called with num_proofs: {}", num_proofs);
     unsafe {
         // Convert C arrays to Rust vectors
         let mut witness_paths_vec = Vec::new();
@@ -129,16 +140,23 @@ pub extern "C" fn parallel_prove(
 
         // Get the single zkey path
         let zkey_path_str = CStr::from_ptr(zkey_path).to_str().unwrap();
+        println!("[RUST] zkey_path: {}", zkey_path_str);
 
         for i in 0..num_proofs {
             let witness_path = CStr::from_ptr(*witness_paths.offset(i as isize)).to_str().unwrap();
             let proof_path = CStr::from_ptr(*proof_paths.offset(i as isize)).to_str().unwrap();
             let public_path = CStr::from_ptr(*public_paths.offset(i as isize)).to_str().unwrap();
 
+            println!("[RUST] Proof {}: witness={}, proof={}, public={}", 
+                     i + 1, witness_path, proof_path, public_path);
+
             witness_paths_vec.push(witness_path.to_string());
             proof_paths_vec.push(proof_path.to_string());
             public_paths_vec.push(public_path.to_string());
         }
+        
+        println!("[RUST] Converted {} witness paths, {} proof paths, {} public paths", 
+                 witness_paths_vec.len(), proof_paths_vec.len(), public_paths_vec.len());
 
         let parallel_result = groth16_parallel_prove(
             &witness_paths_vec,
@@ -150,15 +168,24 @@ pub extern "C" fn parallel_prove(
 
         match parallel_result {
             Ok(results) => {
+                println!("[RUST] parallel_prove succeeded with {} results", results.len());
                 // Convert results to C array
                 let mut c_results = Vec::with_capacity(results.len());
-                for result in results {
-                    c_results.push(result);
+                for (i, result) in results.iter().enumerate() {
+                    let int_value = match result {
+                        ProverResult::Success => 0i64,
+                        ProverResult::Failure => 1i64,
+                    };
+                    println!("[RUST] Result {}: {:?} (int value: {})", i + 1, result, int_value);
+                    c_results.push(int_value);
                 }
                 let boxed_results = c_results.into_boxed_slice();
-                Box::into_raw(boxed_results) as *mut ProverResult
+                println!("[RUST] Returning {} results to C", boxed_results.len());
+                println!("[RUST] Size of i64: {} bytes", std::mem::size_of::<i64>());
+                Box::into_raw(boxed_results) as *mut ProverResultInt
             }
             Err(e) => {
+                println!("[RUST] parallel_prove failed with error: {}", e);
                 string_to_ffi_buf(e.to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
                 std::ptr::null_mut()
             }
