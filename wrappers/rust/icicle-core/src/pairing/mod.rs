@@ -52,10 +52,10 @@ macro_rules! impl_pairing {
                         p as *const Affine<$curve>,
                         q as *const Affine<$curve_g2>,
                         &mut result as *mut $target_field,
-                    )
-                    .wrap()
+                    );
+
+                    Ok(result)
                 }
-                .map(|_| result)
             }
         }
     };
