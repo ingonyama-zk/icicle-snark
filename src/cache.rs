@@ -246,7 +246,7 @@ impl CacheManager {
             release_domain::<F>().unwrap();
         }
 
-        let domain: F = get_root_of_unity(cache.points_a.len() as u64);
+        let domain: F = get_root_of_unity(cache.zkey.domain_size as u64);
         let cfg = NTTInitDomainConfig::default();
         initialize_domain(domain, &cfg).unwrap();
 
