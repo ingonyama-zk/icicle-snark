@@ -325,7 +325,6 @@ fn compute_h_batched(
         d_h_results.push(d_h);
     }
     
-    let _ = release_domain::<ScalarField>();
     stream.synchronize().unwrap();
     d_h_results
 }
@@ -754,8 +753,10 @@ pub fn parallel_prove(
     proof_paths: &[String],
     public_paths: &[String],
     device_type: DeviceType,
+    max_batch_size: Option<usize>,
 ) -> Result<Vec<ProverResult>, Box<dyn std::error::Error>> {
-    println!("[GROTH16] parallel_prove called with {} witness paths", witness_paths.len());
+    let max_batch_size = max_batch_size.unwrap_or(10);
+    println!("[GROTH16] parallel_prove called with {} witness paths, max_batch_size: {}", witness_paths.len(), max_batch_size);
     
     if witness_paths.len() != proof_paths.len() || 
        proof_paths.len() != public_paths.len() {
@@ -770,7 +771,7 @@ pub fn parallel_prove(
     println!("[GROTH16] Public paths: {:?}", public_paths);
     println!("[GROTH16] Zkey path: {:?}", zkey_path);
     println!("[GROTH16] Device type: {:?}", device_type);
-    println!("[GROTH16] Batch size: {}", witness_paths.len());
+    println!("[GROTH16] Total witnesses: {}, Max batch size: {}", witness_paths.len(), max_batch_size);
 
     // Load zkey once for all proofs
     let zkey = match ZKey::load(zkey_path) {
@@ -778,135 +779,164 @@ pub fn parallel_prove(
         Err(_) => return Err("Failed to load zkey file".into()),
     };
 
-    // Load all witnesses and convert to scalars
-    let mut scalars_array: Vec<Vec<F>> = Vec::with_capacity(witness_paths.len());
-    
-    println!("[GROTH16] Loading {} witnesses...", witness_paths.len());
-    
-    for (i, witness_path) in witness_paths.iter().enumerate() {
-        println!("[GROTH16] Loading witness {}: {}", i + 1, witness_path);
-        
-        let (mut wtns_file, sections_wtns) = match FileWrapper::read_bin_file(witness_path, "wtns", 2) {
-            Ok(result) => result,
-            Err(e) => {
-                println!("[GROTH16] ERROR: Failed to read witness file {}: {:?}", i + 1, e);
-                return Ok(vec![ProverResult::Failure; witness_paths.len()]);
-            },
-        };
-
-        let wtns = match wtns_file.read_wtns_header(&sections_wtns[..]) {
-            Ok(wtns) => wtns,
-            Err(e) => {
-                println!("[GROTH16] ERROR: Failed to read witness header {}: {:?}", i + 1, e);
-                return Ok(vec![ProverResult::Failure; witness_paths.len()]);
-            },
-        };
-
-        let ZKeyHeader::Groth16(header) = &zkey.header;
-        if !F::eq(&header.r, &wtns.q) || wtns.n_witness != header.n_vars {
-            println!("[GROTH16] ERROR: Witness {} validation failed - r: {:?} vs {:?}, n_witness: {} vs {}", 
-                     i + 1, header.r, wtns.q, header.n_vars, wtns.n_witness);
-            return Ok(vec![ProverResult::Failure; witness_paths.len()]);
-        }
-
-        let buff_witness = match wtns_file.read_section(&sections_wtns[..], 2) {
-            Ok(buff) => buff,
-            Err(e) => {
-                println!("[GROTH16] ERROR: Failed to read witness section {}: {:?}", i + 1, e);
-                return Ok(vec![ProverResult::Failure; witness_paths.len()]);
-            },
-        };
-
-        let scalars = from_u8::<F>(buff_witness).to_vec();
-        println!("[GROTH16] Witness {} loaded with {} scalars", i + 1, scalars.len());
-        scalars_array.push(scalars);
-    }
-    
-    println!("[GROTH16] Successfully loaded {} witnesses", scalars_array.len());
-
     // Set device and initialize domain once for all proofs
     set_device(device_type);
     let ZKeyHeader::Groth16(header) = &zkey.header;
     icicle_initialize_domain(header.domain_size as u64);
 
-    // Generate all proofs in a single batch using Icicle's native batch processing
-    let batch_size = witness_paths.len();
-    let prove_results = match device_type {
-        DeviceType::Cpu => {
-            prove_cpu_batched(&scalars_array, &zkey, &header, batch_size)
-        }
-        DeviceType::CpuMetal => {
-            prove_metal_cpu_batched(&scalars_array, &zkey, &header, batch_size)
-        }
-        DeviceType::Metal => {
-            prove_metal_batched(&scalars_array, &zkey, &header, batch_size)
-        }
-    };
-
-    println!("[GROTH16] Processing {} proof results...", prove_results.len());
+    // Process witnesses in batches
+    let mut all_results = Vec::with_capacity(witness_paths.len());
+    let total_batches = (witness_paths.len() + max_batch_size - 1) / max_batch_size; // Ceiling division
     
-    // Process results and save files
-    let mut results = Vec::with_capacity(witness_paths.len());
-    
-    for (i, (pi_a, pi_b1, pi_b, pi_c, pi_h)) in prove_results.into_iter().enumerate() {
-        println!("[GROTH16] Processing proof result {}...", i + 1);
-        #[cfg(not(feature = "no-randomness"))]
-        let (pi_a, pi_b, pi_c) = {
-            let rs = ScalarCfg::generate_random(2);
-            let r = rs[0];
-            let s = rs[1];
-            let pi_a = pi_a + header.vk_alpha_1 + header.vk_delta_1 * r;
-            let pi_b = pi_b + header.vk_beta_2 + header.vk_delta_2 * s;
-            let pi_b1 = pi_b1 + header.vk_beta_1 + header.vk_delta_1 * s;
-            let pi_c = pi_c + pi_h + pi_a * s + pi_b1 * r - header.vk_delta_1 * r * s;
-            (pi_a, pi_b, pi_c)
-        };
-        #[cfg(feature = "no-randomness")]
-        let (pi_a, pi_b, pi_c) = {
-            let pi_a = pi_a + zkey.vk_alpha_1 + zkey.vk_delta_1;
-            let pi_b = pi_b + zkey.vk_beta_2 + zkey.vk_delta_2;
-            let pi_b1 = pi_b1 + zkey.vk_beta_1 + zkey.vk_delta_1;
-            let pi_c = pi_c + pi_h + pi_a + pi_b1 - zkey.vk_delta_1;
-            (pi_a, pi_b, pi_c)
-        };
+    println!("[GROTH16] Processing {} total witnesses in {} batches of max size {}", 
+             witness_paths.len(), total_batches, max_batch_size);
 
-        // Extract public signals from the scalars array
-        let mut public_signals = Vec::with_capacity(header.n_public);
-        for j in 1..=header.n_public {
-            let scalar_bytes: BigUint = BigUint::from_bytes_le(&scalars_array[i][j].to_bytes_le());
-            public_signals.push(scalar_bytes.to_str_radix(10));
+    for batch_idx in 0..total_batches {
+        let start_idx = batch_idx * max_batch_size;
+        let end_idx = std::cmp::min(start_idx + max_batch_size, witness_paths.len());
+        let current_batch_size = end_idx - start_idx;
+        
+        println!("[GROTH16] Processing batch {}/{} (witnesses {} to {})", 
+                 batch_idx + 1, total_batches, start_idx + 1, end_idx);
+
+        // Load witnesses for current batch
+        let mut scalars_array: Vec<Vec<F>> = Vec::with_capacity(current_batch_size);
+        
+        for i in start_idx..end_idx {
+            let witness_path = &witness_paths[i];
+            println!("[GROTH16] Loading witness {}: {}", i + 1, witness_path);
+            
+            let (mut wtns_file, sections_wtns) = match FileWrapper::read_bin_file(witness_path, "wtns", 2) {
+                Ok(result) => result,
+                Err(e) => {
+                    println!("[GROTH16] ERROR: Failed to read witness file {}: {:?}", i + 1, e);
+                    // Fill remaining results with failures
+                    all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                    return Ok(all_results);
+                },
+            };
+
+            let wtns = match wtns_file.read_wtns_header(&sections_wtns[..]) {
+                Ok(wtns) => wtns,
+                Err(e) => {
+                    println!("[GROTH16] ERROR: Failed to read witness header {}: {:?}", i + 1, e);
+                    // Fill remaining results with failures
+                    all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                    return Ok(all_results);
+                },
+            };
+
+            if !F::eq(&header.r, &wtns.q) || wtns.n_witness != header.n_vars {
+                println!("[GROTH16] ERROR: Witness {} validation failed - r: {:?} vs {:?}, n_witness: {} vs {}", 
+                         i + 1, header.r, wtns.q, header.n_vars, wtns.n_witness);
+                // Fill remaining results with failures
+                all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                return Ok(all_results);
+            }
+
+            let buff_witness = match wtns_file.read_section(&sections_wtns[..], 2) {
+                Ok(buff) => buff,
+                Err(e) => {
+                    println!("[GROTH16] ERROR: Failed to read witness section {}: {:?}", i + 1, e);
+                    // Fill remaining results with failures
+                    all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                    return Ok(all_results);
+                },
+            };
+
+            let scalars = from_u8::<F>(buff_witness).to_vec();
+            println!("[GROTH16] Witness {} loaded with {} scalars", i + 1, scalars.len());
+            scalars_array.push(scalars);
         }
+        
+        println!("[GROTH16] Successfully loaded {} witnesses for batch {}", scalars_array.len(), batch_idx + 1);
 
-        let proof = Proof {
-            pi_a: serialize_g1_affine(pi_a.into()),
-            pi_b: serialize_g2_affine(pi_b.into()),
-            pi_c: serialize_g1_affine(pi_c.into()),
-            protocol: "groth16".to_string(),
-            curve: "bn128".to_string(),
+        // Generate proofs for current batch
+        let prove_results = match device_type {
+            DeviceType::Cpu => {
+                prove_cpu_batched(&scalars_array, &zkey, &header, current_batch_size)
+            }
+            DeviceType::CpuMetal => {
+                prove_metal_cpu_batched(&scalars_array, &zkey, &header, current_batch_size)
+            }
+            DeviceType::Metal => {
+                prove_metal_batched(&scalars_array, &zkey, &header, current_batch_size)
+            }
         };
 
-        let proof_save_result = FileWrapper::save_json_file(&proof_paths[i], &proof);
-        let public_save_result = FileWrapper::save_json_file(&public_paths[i], &public_signals);
+        println!("[GROTH16] Processing {} proof results for batch {}...", prove_results.len(), batch_idx + 1);
         
-        let result = if proof_save_result.is_err() || public_save_result.is_err() {
-            println!("[GROTH16] ERROR: Failed to save files for proof {}", i + 1);
-            if proof_save_result.is_err() {
-                println!("[GROTH16] Proof save error: {:?}", proof_save_result.err());
+        // Process results and save files for current batch
+        for (batch_result_idx, (pi_a, pi_b1, pi_b, pi_c, pi_h)) in prove_results.into_iter().enumerate() {
+            let global_idx = start_idx + batch_result_idx;
+            println!("[GROTH16] Processing proof result {} (global index {})...", batch_result_idx + 1, global_idx + 1);
+            
+            #[cfg(not(feature = "no-randomness"))]
+            let (pi_a, pi_b, pi_c) = {
+                let rs = ScalarCfg::generate_random(2);
+                let r = rs[0];
+                let s = rs[1];
+                let pi_a = pi_a + header.vk_alpha_1 + header.vk_delta_1 * r;
+                let pi_b = pi_b + header.vk_beta_2 + header.vk_delta_2 * s;
+                let pi_b1 = pi_b1 + header.vk_beta_1 + header.vk_delta_1 * s;
+                let pi_c = pi_c + pi_h + pi_a * s + pi_b1 * r - header.vk_delta_1 * r * s;
+                (pi_a, pi_b, pi_c)
+            };
+            #[cfg(feature = "no-randomness")]
+            let (pi_a, pi_b, pi_c) = {
+                let pi_a = pi_a + zkey.vk_alpha_1 + zkey.vk_delta_1;
+                let pi_b = pi_b + zkey.vk_beta_2 + zkey.vk_delta_2;
+                let pi_b1 = pi_b1 + zkey.vk_beta_1 + zkey.vk_delta_1;
+                let pi_c = pi_c + pi_h + pi_a + pi_b1 - zkey.vk_delta_1;
+                (pi_a, pi_b, pi_c)
+            };
+
+            // Extract public signals from the scalars array
+            let mut public_signals = Vec::with_capacity(header.n_public);
+            for j in 1..=header.n_public {
+                let scalar_bytes: BigUint = BigUint::from_bytes_le(&scalars_array[batch_result_idx][j].to_bytes_le());
+                public_signals.push(scalar_bytes.to_str_radix(10));
             }
-            if public_save_result.is_err() {
-                println!("[GROTH16] Public save error: {:?}", public_save_result.err());
-            }
-            ProverResult::Failure
-        } else {
-            println!("[GROTH16] Successfully saved files for proof {}", i + 1);
-            ProverResult::Success
-        };
+
+            let proof = Proof {
+                pi_a: serialize_g1_affine(pi_a.into()),
+                pi_b: serialize_g2_affine(pi_b.into()),
+                pi_c: serialize_g1_affine(pi_c.into()),
+                protocol: "groth16".to_string(),
+                curve: "bn128".to_string(),
+            };
+
+            let proof_save_result = FileWrapper::save_json_file(&proof_paths[global_idx], &proof);
+            let public_save_result = FileWrapper::save_json_file(&public_paths[global_idx], &public_signals);
+            
+            let result = if proof_save_result.is_err() || public_save_result.is_err() {
+                println!("[GROTH16] ERROR: Failed to save files for proof {} (global index {})", batch_result_idx + 1, global_idx + 1);
+                if proof_save_result.is_err() {
+                    println!("[GROTH16] Proof save error: {:?}", proof_save_result.err());
+                }
+                if public_save_result.is_err() {
+                    println!("[GROTH16] Public save error: {:?}", public_save_result.err());
+                }
+                ProverResult::Failure
+            } else {
+                println!("[GROTH16] Successfully saved files for proof {} (global index {})", batch_result_idx + 1, global_idx + 1);
+                ProverResult::Success
+            };
+            
+            all_results.push(result);
+            println!("[GROTH16] Proof {} (global index {}) result: {:?}", batch_result_idx + 1, global_idx + 1, result);
+        }
         
-        results.push(result);
-        println!("[GROTH16] Proof {} result: {:?}", i + 1, result);
+        println!("[GROTH16] Completed batch {}/{} with {} results", batch_idx + 1, total_batches, current_batch_size);
     }
 
-    println!("[GROTH16] Batched proof generation completed with {} results: {:?}", results.len(), results);
-    Ok(results)
+    println!("[GROTH16] All batches completed with {} total results: {:?}", all_results.len(), all_results);
+    
+    // Clean up NTT domain after all batches are complete
+    let _ = release_domain::<ScalarField>();
+    
+    Ok(all_results)
 }
+
+
 

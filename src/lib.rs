@@ -130,6 +130,7 @@ pub extern "C" fn parallel_prove(
     error_msg: *mut c_char,
     error_msg_maxsize: c_ulonglong,
     device_type: DeviceType,
+    max_batch_size: c_ulonglong,
 ) -> *mut ProverResultInt {
     println!("[RUST] parallel_prove called with num_proofs: {}", num_proofs);
     unsafe {
@@ -164,6 +165,7 @@ pub extern "C" fn parallel_prove(
             &proof_paths_vec,
             &public_paths_vec,
             device_type,
+            if max_batch_size > 0 { Some(max_batch_size as usize) } else { None },
         );
 
         match parallel_result {
