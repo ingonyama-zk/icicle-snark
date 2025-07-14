@@ -23,6 +23,7 @@ clap = { version="4.5.23", features=["derive"] }
 [features]
 default=[]
 no-randomness=[]
+debug=[]
 
 [profile.release]
 lto = true

@@ -24,7 +24,19 @@ use crate::{
     DeviceType, ProverResult
 };
 
-use std::time::Instant; // SP: measure runtime
+use std::time::Instant;
+
+#[cfg(feature = "debug")]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        println!($($arg)*);
+    };
+}
+
+#[cfg(not(feature = "debug"))]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {};
+}
 
 #[cfg(not(feature = "no-randomness"))]
 use icicle_bn254::curve::ScalarCfg;
@@ -232,7 +244,7 @@ fn compute_h_batched(
         }
     }
     
-    println!("compute_h_batched: batch_size={}, individual_size={}, total_size={}, domain_size={}", 
+    debug_println!("compute_h_batched: batch_size={}, individual_size={}, total_size={}, domain_size={}", 
              batch_size, expected_size, expected_size * batch_size, nof_coef);
     
     // Concatenate all d_vecs into a single batch for NTT
@@ -351,8 +363,8 @@ fn commitments_batched(
     batch_size: usize
 ) -> Vec<(ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1)> {
     
-    println!("commitments_batched: batch_size={}, n_public={}", batch_size, n_public);
-    println!("commitments_batched: scalars_array lengths: {:?}", scalars_array.iter().map(|s| s.len()).collect::<Vec<_>>());
+    debug_println!("commitments_batched: batch_size={}, n_public={}", batch_size, n_public);
+    debug_println!("commitments_batched: scalars_array lengths: {:?}", scalars_array.iter().map(|s| s.len()).collect::<Vec<_>>());
     
     // Configure MSM for batch processing
     let mut msm_config = MSMConfig::default();
@@ -365,28 +377,28 @@ fn commitments_batched(
     let total_scalars: Vec<F> = scalars_array.iter().flat_map(|s| s.iter()).cloned().collect();
     let host_scalars = HostSlice::from_slice(&total_scalars);
     
-    println!("commitments_batched: total_scalars length: {}", total_scalars.len());
+    debug_println!("commitments_batched: total_scalars length: {}", total_scalars.len());
     
     // Batch commit for pi_a
-    println!("commitments_batched: Starting pi_a MSM");
+    debug_println!("commitments_batched: Starting pi_a MSM");
     let mut pi_a_results = vec![ProjectiveG1::zero(); batch_size];
     let pi_a_slice = HostSlice::from_mut_slice(&mut pi_a_results);
     commit_g1_batched(&host_scalars[..], zkey, 5, "a", &msm_config, stream, pi_a_slice);
-    println!("commitments_batched: Completed pi_a MSM");
+    debug_println!("commitments_batched: Completed pi_a MSM");
     
     // Batch commit for pi_b1
-    println!("commitments_batched: Starting pi_b1 MSM");
+    debug_println!("commitments_batched: Starting pi_b1 MSM");
     let mut pi_b1_results = vec![ProjectiveG1::zero(); batch_size];
     let pi_b1_slice = HostSlice::from_mut_slice(&mut pi_b1_results);
     commit_g1_batched(&host_scalars[..], zkey, 6, "b1", &msm_config, stream, pi_b1_slice);
-    println!("commitments_batched: Completed pi_b1 MSM");
+    debug_println!("commitments_batched: Completed pi_b1 MSM");
     
     // Batch commit for pi_b (G2)
-    println!("commitments_batched: Starting pi_b MSM");
+    debug_println!("commitments_batched: Starting pi_b MSM");
     let mut pi_b_results = vec![ProjectiveG2::zero(); batch_size];
     let pi_b_slice = HostSlice::from_mut_slice(&mut pi_b_results);
     commit_g2_batched(&host_scalars[..], zkey, 7, "b", &msm_config, stream, pi_b_slice);
-    println!("commitments_batched: Completed pi_b MSM");
+    debug_println!("commitments_batched: Completed pi_b MSM");
     
     // Batch commit for pi_c (only private inputs)
     let private_scalars: Vec<F> = scalars_array.iter()
@@ -394,12 +406,12 @@ fn commitments_batched(
         .cloned()
         .collect();
     let host_private_scalars = HostSlice::from_slice(&private_scalars);
-    println!("commitments_batched: private_scalars length: {}", private_scalars.len());
-    println!("commitments_batched: Starting pi_c MSM");
+    debug_println!("commitments_batched: private_scalars length: {}", private_scalars.len());
+    debug_println!("commitments_batched: Starting pi_c MSM");
     let mut pi_c_results = vec![ProjectiveG1::zero(); batch_size];
     let pi_c_slice = HostSlice::from_mut_slice(&mut pi_c_results);
     commit_g1_batched(&host_private_scalars[..], zkey, 8, "c", &msm_config, stream, pi_c_slice);
-    println!("commitments_batched: Completed pi_c MSM");
+    debug_println!("commitments_batched: Completed pi_c MSM");
     
     // Combine results
     (0..batch_size).map(|i| (
@@ -419,7 +431,6 @@ fn commit_g1(d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), zkey: &
     stream.synchronize().unwrap();
 
     icicle_msm(d_scalars, &d_points, commit_config, label)
-    // stream.synchronize().unwrap();
 }
 
 fn commit_g2(d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), zkey: &ZKey, section_idx: usize, label: &str, commit_config: &MSMConfig, stream: &IcicleStream) -> ProjectiveG2 {
@@ -430,7 +441,6 @@ fn commit_g2(d_scalars: &(impl HostOrDeviceSlice<ScalarField> + ?Sized), zkey: &
     G2::from_mont(&mut d_points, &stream);
     stream.synchronize().unwrap();
     icicle_msm(d_scalars, &d_points, commit_config, label)
-    // stream.synchronize().unwrap();
 }
 
 fn commit_g1_batched(
@@ -442,7 +452,7 @@ fn commit_g1_batched(
     stream: &IcicleStream,
     results: &mut (impl HostOrDeviceSlice<ProjectiveG1> + ?Sized)
 ) {
-    println!("commit_g1_batched: section_idx={}, d_scalars len={}, points len={}, batch_size={}", 
+    debug_println!("commit_g1_batched: section_idx={}, d_scalars len={}, points len={}, batch_size={}", 
              section_idx, d_scalars.len(), commit_config.batch_size, commit_config.batch_size);
     
     let points_raw = from_u8(&zkey.file.read_section(&zkey.sections, section_idx).unwrap());
@@ -454,7 +464,7 @@ fn commit_g1_batched(
 
     // Use Icicle's native batch MSM
     icicle_core::msm::msm(d_scalars, &d_points, commit_config, results).unwrap();
-    println!("commit_g1_batched: MSM completed for section {}", section_idx);
+    debug_println!("commit_g1_batched: MSM completed for section {}", section_idx);
 }
 
 fn commit_g2_batched(
@@ -466,7 +476,7 @@ fn commit_g2_batched(
     stream: &IcicleStream,
     results: &mut (impl HostOrDeviceSlice<ProjectiveG2> + ?Sized)
 ) {
-    println!("commit_g2_batched: section_idx={}, d_scalars len={}, points len={}, batch_size={}", 
+    debug_println!("commit_g2_batched: section_idx={}, d_scalars len={}, points len={}, batch_size={}", 
              section_idx, d_scalars.len(), commit_config.batch_size, commit_config.batch_size);
     
     let points_raw = from_u8(&zkey.file.read_section(&zkey.sections, section_idx).unwrap());
@@ -478,12 +488,12 @@ fn commit_g2_batched(
 
     // Use Icicle's native batch MSM
     icicle_core::msm::msm(d_scalars, &d_points, commit_config, results).unwrap();
-    println!("commit_g2_batched: MSM completed for section {}", section_idx);
+    debug_println!("commit_g2_batched: MSM completed for section {}", section_idx);
 }
 
 fn prove_cpu(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1) {
     let coset_gen = F::from_hex(W[header.power + 1]);
-    let stream = IcicleStream::create().unwrap();
+    let mut stream = IcicleStream::create().unwrap();
     let (pi_a, pi_b1, pi_b, pi_c) = commitments(scalars, zkey, header.n_public, &stream);
  
     let mut d_vec = construct_r1cs(scalars, zkey, header, &stream);
@@ -493,6 +503,7 @@ fn prove_cpu(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (Project
     msm_config.c = 14;
     let pi_h = commit_g1(&d_h, zkey, 9, "h", &msm_config, &stream);
     stream.synchronize().unwrap();
+    stream.destroy().unwrap();
 
     (pi_a, pi_b1, pi_b, pi_c, pi_h)
 }
@@ -502,8 +513,11 @@ fn prove_metal_cpu(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (P
         let cpu_thread = s.spawn(|| {
             let device = Device::new("CPU", 0);
             icicle_runtime::set_device(&device).unwrap();
-            let cpu_stream = IcicleStream::create().unwrap();
-            commitments(scalars, zkey, header.n_public, &cpu_stream)
+            let mut cpu_stream = IcicleStream::create().unwrap();
+            let result = commitments(scalars, zkey, header.n_public, &cpu_stream);
+            cpu_stream.synchronize().unwrap();
+            cpu_stream.destroy().unwrap();
+            result
         });
 
         let domain_size = header.domain_size;
@@ -511,7 +525,6 @@ fn prove_metal_cpu(scalars: &[F], zkey: &ZKey, header: &Groth16ZKeyHeader) -> (P
         let mut stream = IcicleStream::create().unwrap();
         let mut d_vec = construct_r1cs(scalars, zkey, header, &stream);
         // Arbitrary coset is not supported in METAL yet
-        // SP: NTT inside
         let d_h = compute_h(&mut d_vec, None, domain_size, Some(&keys), &stream); 
         
 
@@ -539,7 +552,7 @@ fn prove_cpu_batched(
     batch_size: usize
 ) -> Vec<(ProjectiveG1, ProjectiveG1, ProjectiveG2, ProjectiveG1, ProjectiveG1)> {
     let coset_gen = F::from_hex(W[header.power + 1]);
-    let stream = IcicleStream::create().unwrap();
+    let mut stream = IcicleStream::create().unwrap();
     
     // Batch commitments
     let commitments_results = commitments_batched(scalars_array, zkey, header.n_public, &stream, batch_size);
@@ -577,6 +590,7 @@ fn prove_cpu_batched(
     commit_g1_batched(&batched_d_h, zkey, 9, "h", &msm_config, &stream, pi_h_slice);
     
     stream.synchronize().unwrap();
+    stream.destroy().unwrap();
 
     // Combine all results
     commitments_results.into_iter()
@@ -595,8 +609,11 @@ fn prove_metal_cpu_batched(
         let cpu_thread = s.spawn(|| {
             let device = Device::new("CPU", 0);
             icicle_runtime::set_device(&device).unwrap();
-            let cpu_stream = IcicleStream::create().unwrap();
-            commitments_batched(scalars_array, zkey, header.n_public, &cpu_stream, batch_size)
+            let mut cpu_stream = IcicleStream::create().unwrap();
+            let result = commitments_batched(scalars_array, zkey, header.n_public, &cpu_stream, batch_size);
+            cpu_stream.synchronize().unwrap();
+            cpu_stream.destroy().unwrap();
+            result
         });
 
         let domain_size = header.domain_size;
@@ -604,11 +621,11 @@ fn prove_metal_cpu_batched(
         let mut stream = IcicleStream::create().unwrap();
         
         // Batch R1CS construction and compute_h
-        println!("Building R1CS");
+        debug_println!("Building R1CS");
         let mut d_vecs: Vec<DeviceVec<ScalarField>> = Vec::with_capacity(scalars_array.len());
-        println!("scalars_array.len(): {}", scalars_array.len());
+        debug_println!("scalars_array.len(): {}", scalars_array.len());
         for scalars in scalars_array {
-            println!("scalars.len(): {}", scalars.len());
+            debug_println!("scalars.len(): {}", scalars.len());
             let d_vec = construct_r1cs(scalars, zkey, header, &stream);
             d_vecs.push(d_vec);
         }
@@ -665,7 +682,7 @@ pub fn prove(
     device_type: DeviceType,
 ) -> Result<(Value, Value), Box<dyn std::error::Error>> {
     
-    let start = Instant::now(); // SP: measure runtime
+    let start = Instant::now();
     let (mut wtns_file, sections_wtns) = FileWrapper::read_bin_file(witness, "wtns", 2).unwrap();
     let wtns = wtns_file.read_wtns_header(&sections_wtns[..]).unwrap();
     
@@ -741,7 +758,7 @@ pub fn prove(
         protocol: "groth16".to_string(),
         curve: "bn128".to_string(),
     };
-    println!("proof took: {:?}", start.elapsed()); // SP: measure runtime
+    debug_println!("proof took: {:?}", start.elapsed());
     Ok((serde_json::json!(proof), serde_json::json!(public_signals)))
 }
 
@@ -756,22 +773,22 @@ pub fn parallel_prove(
     max_batch_size: Option<usize>,
 ) -> Result<Vec<ProverResult>, Box<dyn std::error::Error>> {
     let max_batch_size = max_batch_size.unwrap_or(10);
-    println!("[GROTH16] parallel_prove called with {} witness paths, max_batch_size: {}", witness_paths.len(), max_batch_size);
+    debug_println!("[GROTH16] parallel_prove called with {} witness paths, max_batch_size: {}", witness_paths.len(), max_batch_size);
     
     if witness_paths.len() != proof_paths.len() || 
        proof_paths.len() != public_paths.len() {
-        println!("[GROTH16] ERROR: Array length mismatch - witness: {}, proof: {}, public: {}", 
+                debug_println!("[GROTH16] ERROR: Array length mismatch - witness: {}, proof: {}, public: {}",
                  witness_paths.len(), proof_paths.len(), public_paths.len());
         return Err("All input arrays must have the same length".into());
     }
 
-    println!("[GROTH16] Batched proof generation started");
-    println!("[GROTH16] Witness paths: {:?}", witness_paths);
-    println!("[GROTH16] Proof paths: {:?}", proof_paths);
-    println!("[GROTH16] Public paths: {:?}", public_paths);
-    println!("[GROTH16] Zkey path: {:?}", zkey_path);
-    println!("[GROTH16] Device type: {:?}", device_type);
-    println!("[GROTH16] Total witnesses: {}, Max batch size: {}", witness_paths.len(), max_batch_size);
+    debug_println!("[GROTH16] Batched proof generation started");
+    debug_println!("[GROTH16] Witness paths: {:?}", witness_paths);
+    debug_println!("[GROTH16] Proof paths: {:?}", proof_paths);
+    debug_println!("[GROTH16] Public paths: {:?}", public_paths);
+    debug_println!("[GROTH16] Zkey path: {:?}", zkey_path);
+    debug_println!("[GROTH16] Device type: {:?}", device_type);
+    debug_println!("[GROTH16] Total witnesses: {}, Max batch size: {}", witness_paths.len(), max_batch_size);
 
     // Load zkey once for all proofs
     let zkey = match ZKey::load(zkey_path) {
@@ -788,7 +805,7 @@ pub fn parallel_prove(
     let mut all_results = Vec::with_capacity(witness_paths.len());
     let total_batches = (witness_paths.len() + max_batch_size - 1) / max_batch_size; // Ceiling division
     
-    println!("[GROTH16] Processing {} total witnesses in {} batches of max size {}", 
+        debug_println!("[GROTH16] Processing {} total witnesses in {} batches of max size {}",
              witness_paths.len(), total_batches, max_batch_size);
 
     for batch_idx in 0..total_batches {
@@ -796,7 +813,7 @@ pub fn parallel_prove(
         let end_idx = std::cmp::min(start_idx + max_batch_size, witness_paths.len());
         let current_batch_size = end_idx - start_idx;
         
-        println!("[GROTH16] Processing batch {}/{} (witnesses {} to {})", 
+        debug_println!("[GROTH16] Processing batch {}/{} (witnesses {} to {})", 
                  batch_idx + 1, total_batches, start_idx + 1, end_idx);
 
         // Load witnesses for current batch
@@ -804,14 +821,14 @@ pub fn parallel_prove(
         
         for i in start_idx..end_idx {
             let witness_path = &witness_paths[i];
-            println!("[GROTH16] Loading witness {}: {}", i + 1, witness_path);
+            debug_println!("[GROTH16] Loading witness {}: {}", i + 1, witness_path);
             
             let (mut wtns_file, sections_wtns) = match FileWrapper::read_bin_file(witness_path, "wtns", 2) {
                 Ok(result) => result,
                 Err(e) => {
-                    println!("[GROTH16] ERROR: Failed to read witness file {}: {:?}", i + 1, e);
+                    debug_println!("[GROTH16] ERROR: Failed to read witness file {}: {:?}", i + 1, e);
                     // Fill remaining results with failures
-                    all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                    all_results.extend(vec![ProverResult::FAILURE; witness_paths.len() - all_results.len()]);
                     return Ok(all_results);
                 },
             };
@@ -819,37 +836,37 @@ pub fn parallel_prove(
             let wtns = match wtns_file.read_wtns_header(&sections_wtns[..]) {
                 Ok(wtns) => wtns,
                 Err(e) => {
-                    println!("[GROTH16] ERROR: Failed to read witness header {}: {:?}", i + 1, e);
+                    debug_println!("[GROTH16] ERROR: Failed to read witness header {}: {:?}", i + 1, e);
                     // Fill remaining results with failures
-                    all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                    all_results.extend(vec![ProverResult::FAILURE; witness_paths.len() - all_results.len()]);
                     return Ok(all_results);
                 },
             };
 
             if !F::eq(&header.r, &wtns.q) || wtns.n_witness != header.n_vars {
-                println!("[GROTH16] ERROR: Witness {} validation failed - r: {:?} vs {:?}, n_witness: {} vs {}", 
+                debug_println!("[GROTH16] ERROR: Witness {} validation failed - r: {:?} vs {:?}, n_witness: {} vs {}", 
                          i + 1, header.r, wtns.q, header.n_vars, wtns.n_witness);
                 // Fill remaining results with failures
-                all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                all_results.extend(vec![ProverResult::FAILURE; witness_paths.len() - all_results.len()]);
                 return Ok(all_results);
             }
 
             let buff_witness = match wtns_file.read_section(&sections_wtns[..], 2) {
                 Ok(buff) => buff,
                 Err(e) => {
-                    println!("[GROTH16] ERROR: Failed to read witness section {}: {:?}", i + 1, e);
+                    debug_println!("[GROTH16] ERROR: Failed to read witness section {}: {:?}", i + 1, e);
                     // Fill remaining results with failures
-                    all_results.extend(vec![ProverResult::Failure; witness_paths.len() - all_results.len()]);
+                    all_results.extend(vec![ProverResult::FAILURE; witness_paths.len() - all_results.len()]);
                     return Ok(all_results);
                 },
             };
 
             let scalars = from_u8::<F>(buff_witness).to_vec();
-            println!("[GROTH16] Witness {} loaded with {} scalars", i + 1, scalars.len());
+            debug_println!("[GROTH16] Witness {} loaded with {} scalars", i + 1, scalars.len());
             scalars_array.push(scalars);
         }
         
-        println!("[GROTH16] Successfully loaded {} witnesses for batch {}", scalars_array.len(), batch_idx + 1);
+        debug_println!("[GROTH16] Successfully loaded {} witnesses for batch {}", scalars_array.len(), batch_idx + 1);
 
         // Generate proofs for current batch
         let prove_results = match device_type {
@@ -864,12 +881,12 @@ pub fn parallel_prove(
             }
         };
 
-        println!("[GROTH16] Processing {} proof results for batch {}...", prove_results.len(), batch_idx + 1);
+        debug_println!("[GROTH16] Processing {} proof results for batch {}...", prove_results.len(), batch_idx + 1);
         
         // Process results and save files for current batch
         for (batch_result_idx, (pi_a, pi_b1, pi_b, pi_c, pi_h)) in prove_results.into_iter().enumerate() {
             let global_idx = start_idx + batch_result_idx;
-            println!("[GROTH16] Processing proof result {} (global index {})...", batch_result_idx + 1, global_idx + 1);
+            debug_println!("[GROTH16] Processing proof result {} (global index {})...", batch_result_idx + 1, global_idx + 1);
             
             #[cfg(not(feature = "no-randomness"))]
             let (pi_a, pi_b, pi_c) = {
@@ -910,27 +927,27 @@ pub fn parallel_prove(
             let public_save_result = FileWrapper::save_json_file(&public_paths[global_idx], &public_signals);
             
             let result = if proof_save_result.is_err() || public_save_result.is_err() {
-                println!("[GROTH16] ERROR: Failed to save files for proof {} (global index {})", batch_result_idx + 1, global_idx + 1);
+                debug_println!("[GROTH16] ERROR: Failed to save files for proof {} (global index {})", batch_result_idx + 1, global_idx + 1);
                 if proof_save_result.is_err() {
-                    println!("[GROTH16] Proof save error: {:?}", proof_save_result.err());
+                    debug_println!("[GROTH16] Proof save error: {:?}", proof_save_result.err());
                 }
                 if public_save_result.is_err() {
-                    println!("[GROTH16] Public save error: {:?}", public_save_result.err());
+                    debug_println!("[GROTH16] Public save error: {:?}", public_save_result.err());
                 }
-                ProverResult::Failure
+                ProverResult::FAILURE
             } else {
-                println!("[GROTH16] Successfully saved files for proof {} (global index {})", batch_result_idx + 1, global_idx + 1);
-                ProverResult::Success
+                debug_println!("[GROTH16] Successfully saved files for proof {} (global index {})", batch_result_idx + 1, global_idx + 1);
+                ProverResult::SUCCESS
             };
             
             all_results.push(result);
-            println!("[GROTH16] Proof {} (global index {}) result: {:?}", batch_result_idx + 1, global_idx + 1, result);
+            debug_println!("[GROTH16] Proof {} (global index {}) result: {:?}", batch_result_idx + 1, global_idx + 1, result);
         }
         
-        println!("[GROTH16] Completed batch {}/{} with {} results", batch_idx + 1, total_batches, current_batch_size);
+        debug_println!("[GROTH16] Completed batch {}/{} with {} results", batch_idx + 1, total_batches, current_batch_size);
     }
 
-    println!("[GROTH16] All batches completed with {} total results: {:?}", all_results.len(), all_results);
+    debug_println!("[GROTH16] All batches completed with {} total results: {:?}", all_results.len(), all_results);
     
     // Clean up NTT domain after all batches are complete
     let _ = release_domain::<ScalarField>();

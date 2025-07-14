@@ -16,6 +16,18 @@ use groth16::{
 use std::ffi::{c_char, c_ulonglong, CStr};
 use utils::string_to_ffi_buf;
 
+#[cfg(feature = "debug")]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        println!($($arg)*);
+    };
+}
+
+#[cfg(not(feature = "debug"))]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {};
+}
+
 pub type F = ScalarField;
 pub type C1 = CurveCfg;
 pub type C2 = G2CurveCfg;
@@ -58,13 +70,16 @@ pub enum DeviceType {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub enum ProverResult {
-    Success = 0,
-    Failure = 1,
+pub struct ProverResult {
+    pub value: i32,
 }
 
-// Use i64 to ensure 8-byte size to match NSInteger
-pub type ProverResultInt = i64;
+impl ProverResult {
+    pub const SUCCESS: ProverResult = ProverResult { value: 0 };
+    pub const FAILURE: ProverResult = ProverResult { value: 1 };
+}
+
+
 
 #[no_mangle]
 pub extern "C" fn prove(
@@ -86,7 +101,7 @@ pub extern "C" fn prove(
         if zkey.is_err() {
             let zkey_error = zkey.err().unwrap();
             string_to_ffi_buf(zkey_error.to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
-            return ProverResult::Failure;
+            return ProverResult::FAILURE;
         }
         let zkey = zkey.unwrap();
 
@@ -95,20 +110,20 @@ pub extern "C" fn prove(
                 let prove_result = groth16_prove(witness_path, &zkey, device_type);
                 if prove_result.is_err() {
                     string_to_ffi_buf(prove_result.err().unwrap().to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
-                    return ProverResult::Failure;
+                    return ProverResult::FAILURE;
                 }
                 let (proof_data, public_signals) = prove_result.unwrap();
                 let proof_written = FileWrapper::save_json_file(proof_path, &proof_data);
                 if proof_written.is_err() {
                     string_to_ffi_buf(proof_written.err().unwrap().to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
-                    return ProverResult::Failure;
+                    return ProverResult::FAILURE;
                 }
                 let public_written = FileWrapper::save_json_file(public_path, &public_signals);
                 if public_written.is_err() {
                     string_to_ffi_buf(public_written.err().unwrap().to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
-                    return ProverResult::Failure;
+                    return ProverResult::FAILURE;
                 }
-                ProverResult::Success
+                ProverResult::SUCCESS
             },
         }
     }
@@ -126,7 +141,7 @@ pub extern "C" fn parallel_prove(
     device_type: DeviceType,
     max_batch_size: c_ulonglong,
 ) -> *const ProverResult {
-    println!("[RUST] parallel_prove called with num_proofs: {}", num_proofs);
+    debug_println!("[RUST] parallel_prove called with num_proofs: {}", num_proofs);
     unsafe {
         // Convert C arrays to Rust vectors
         let mut witness_paths_vec = Vec::new();
@@ -135,14 +150,14 @@ pub extern "C" fn parallel_prove(
 
         // Get the single zkey path
         let zkey_path_str = CStr::from_ptr(zkey_path).to_str().unwrap();
-        println!("[RUST] zkey_path: {}", zkey_path_str);
+        debug_println!("[RUST] zkey_path: {}", zkey_path_str);
 
         for i in 0..num_proofs {
             let witness_path = CStr::from_ptr(*witness_paths.offset(i as isize)).to_str().unwrap();
             let proof_path = CStr::from_ptr(*proof_paths.offset(i as isize)).to_str().unwrap();
             let public_path = CStr::from_ptr(*public_paths.offset(i as isize)).to_str().unwrap();
 
-            println!("[RUST] Proof {}: witness={}, proof={}, public={}", 
+            debug_println!("[RUST] Proof {}: witness={}, proof={}, public={}", 
                      i + 1, witness_path, proof_path, public_path);
 
             witness_paths_vec.push(witness_path.to_string());
@@ -150,7 +165,7 @@ pub extern "C" fn parallel_prove(
             public_paths_vec.push(public_path.to_string());
         }
         
-        println!("[RUST] Converted {} witness paths, {} proof paths, {} public paths", 
+        debug_println!("[RUST] Converted {} witness paths, {} proof paths, {} public paths", 
                  witness_paths_vec.len(), proof_paths_vec.len(), public_paths_vec.len());
 
         let parallel_result = groth16_parallel_prove(
@@ -164,20 +179,20 @@ pub extern "C" fn parallel_prove(
 
         match parallel_result {
             Ok(results) => {
-                println!("[RUST] parallel_prove succeeded with {} results", results.len());
+                debug_println!("[RUST] parallel_prove succeeded with {} results", results.len());
                 // Convert results directly to ProverResult array
                 let mut c_results = Vec::with_capacity(results.len());
                 for (i, result) in results.iter().enumerate() {
-                    println!("[RUST] Result {}: {:?}", i + 1, result);
+                    debug_println!("[RUST] Result {}: {:?}", i + 1, result);
                     c_results.push(*result);
                 }
                 let boxed_results = c_results.into_boxed_slice();
-                println!("[RUST] Returning {} results to C", boxed_results.len());
-                println!("[RUST] Size of ProverResult: {} bytes", std::mem::size_of::<ProverResult>());
+                debug_println!("[RUST] Returning {} results to C", boxed_results.len());
+                debug_println!("[RUST] Size of ProverResult: {} bytes", std::mem::size_of::<ProverResult>());
                 Box::into_raw(boxed_results) as *const ProverResult
             }
             Err(e) => {
-                println!("[RUST] parallel_prove failed with error: {}", e);
+                debug_println!("[RUST] parallel_prove failed with error: {}", e);
                 string_to_ffi_buf(e.to_string().as_str(), error_msg, error_msg_maxsize).unwrap();
                 std::ptr::null_mut()
             }
