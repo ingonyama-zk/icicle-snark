@@ -39,11 +39,11 @@ impl ProtocolId {
 }
 
 #[no_mangle]
-pub extern "C" fn free_parallel_results(results: *mut ProverResultInt, count: usize) {
+pub extern "C" fn free_parallel_results(results: *const ProverResult, count: usize) {
     unsafe {
         if !results.is_null() {
             // Convert back to Vec and let it drop
-            let _ = Vec::from_raw_parts(results, count, count);
+            let _ = Vec::from_raw_parts(results as *mut ProverResult, count, count);
         }
     }
 }
@@ -65,12 +65,6 @@ pub enum ProverResult {
 
 // Use i64 to ensure 8-byte size to match NSInteger
 pub type ProverResultInt = i64;
-
-#[repr(C)]
-pub struct ParallelResults {
-    pub results: *mut ProverResult,
-    pub count: usize,
-}
 
 #[no_mangle]
 pub extern "C" fn prove(
@@ -131,7 +125,7 @@ pub extern "C" fn parallel_prove(
     error_msg_maxsize: c_ulonglong,
     device_type: DeviceType,
     max_batch_size: c_ulonglong,
-) -> *mut ProverResultInt {
+) -> *const ProverResult {
     println!("[RUST] parallel_prove called with num_proofs: {}", num_proofs);
     unsafe {
         // Convert C arrays to Rust vectors
@@ -171,20 +165,16 @@ pub extern "C" fn parallel_prove(
         match parallel_result {
             Ok(results) => {
                 println!("[RUST] parallel_prove succeeded with {} results", results.len());
-                // Convert results to C array
+                // Convert results directly to ProverResult array
                 let mut c_results = Vec::with_capacity(results.len());
                 for (i, result) in results.iter().enumerate() {
-                    let int_value = match result {
-                        ProverResult::Success => 0i64,
-                        ProverResult::Failure => 1i64,
-                    };
-                    println!("[RUST] Result {}: {:?} (int value: {})", i + 1, result, int_value);
-                    c_results.push(int_value);
+                    println!("[RUST] Result {}: {:?}", i + 1, result);
+                    c_results.push(*result);
                 }
                 let boxed_results = c_results.into_boxed_slice();
                 println!("[RUST] Returning {} results to C", boxed_results.len());
-                println!("[RUST] Size of i64: {} bytes", std::mem::size_of::<i64>());
-                Box::into_raw(boxed_results) as *mut ProverResultInt
+                println!("[RUST] Size of ProverResult: {} bytes", std::mem::size_of::<ProverResult>());
+                Box::into_raw(boxed_results) as *const ProverResult
             }
             Err(e) => {
                 println!("[RUST] parallel_prove failed with error: {}", e);
