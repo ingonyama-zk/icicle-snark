@@ -6,6 +6,18 @@ use std::io::{self, BufWriter, Read, Seek, SeekFrom};
 use std::path::Path;
 use crate::F;
 
+#[cfg(feature = "debug")]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        println!($($arg)*);
+    };
+}
+
+#[cfg(not(feature = "debug"))]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {};
+}
+
 #[derive(Clone, Debug)]
 pub struct Wtsn {
     pub n8: usize,
@@ -35,7 +47,7 @@ impl FileWrapper {
         let mut file = match OpenOptions::new().read(true).write(true).open(file_name) {
             Ok(f) => f,
             Err(e) => {
-                println!("Failed to open file '{}': {} (error kind: {:?})", file_name, e, e.kind());
+                debug_println!("Failed to open file '{}': {} (error kind: {:?})", file_name, e, e.kind());
                 return Err(io::Error::new(
                     e.kind(),
                     format!("Failed to open file '{}': {}", file_name, e)

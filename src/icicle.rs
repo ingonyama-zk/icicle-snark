@@ -33,7 +33,7 @@ pub fn icicle_msm<C: Curve + MSM<C>>(
     scalars: &(impl HostOrDeviceSlice<C::ScalarField> + ?Sized),
     points: &(impl HostOrDeviceSlice<Affine<C>> + ?Sized),
     msm_config: &MSMConfig,
-    msm_name: &str,
+    _msm_name: &str,
 ) -> Projective<C>
 {
     let mut msm_result = vec![Projective::zero(); 1];
