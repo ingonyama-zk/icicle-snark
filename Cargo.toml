@@ -23,7 +23,7 @@ icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "m
 default = []
 no-randomness = []
 debug = []
-ios = ["icicle-runtime/metal_backend", "icicle-bn254/metal_backend"]
+ios = ["icicle-runtime/pull_metal_backend", "icicle-bn254/pull_metal_backend"]
 
 [profile.release]
 lto = false
