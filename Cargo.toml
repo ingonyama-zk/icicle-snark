@@ -19,11 +19,15 @@ icicle-core = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "mo
 icicle-runtime = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "mobile"}
 icicle-bn254 = { git = "https://github.com/ingonyama-zk/icicle.git", branch = "mobile"}
 
+log = { version = "0.4.27", optional = true }
+android_logger = { version = "0.15.1", optional = true }
+
 [features]
 default = []
 no-randomness = []
 debug = []
 ios = ["icicle-runtime/pull_metal_backend", "icicle-bn254/pull_metal_backend"]
+android = ["log", "android_logger"]
 
 [profile.release]
 lto = false

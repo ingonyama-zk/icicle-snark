@@ -11,7 +11,6 @@ use groth16::{
     prove::{prove as groth16_prove, parallel_prove as groth16_parallel_prove, Proof},
     verify::VerificationKey
 };
-// use serde_json;
 
 use std::ffi::{c_char, c_ulonglong, CStr};
 use utils::string_to_ffi_buf;
@@ -27,6 +26,30 @@ macro_rules! debug_println {
 macro_rules! debug_println {
     ($($arg:tt)*) => {};
 }
+#[cfg(feature = "android")]
+use log::LevelFilter;
+#[cfg(feature = "android")]
+use android_logger::Config;
+#[cfg(feature = "android")]
+use std::sync::Once;
+#[cfg(feature = "android")]
+static INIT: Once = Once::new();
+
+#[cfg(feature = "android")]
+fn init_android_logger() {
+    INIT.call_once(|| {
+        android_logger::init_once(
+            Config::default()
+                .with_max_level(LevelFilter::Trace)
+                .with_tag("IMP1")
+                .with_filter(android_logger::FilterBuilder::new()
+                    .parse("debug,IMP1=trace")
+                    .build()),
+        );
+        log::info!("Android logger initialized successfully");
+    });
+}
+
 
 pub type F = ScalarField;
 pub type C1 = CurveCfg;
@@ -91,6 +114,9 @@ pub extern "C" fn prove(
     error_msg_maxsize: c_ulonglong,
     device_type: DeviceType,
 ) -> ProverResult {
+    #[cfg(feature = "android")]
+    init_android_logger();
+
     unsafe {
         let witness_path = CStr::from_ptr(witness_path).to_str().unwrap();
         let zkey_path = CStr::from_ptr(zkey_path).to_str().unwrap();
@@ -214,6 +240,9 @@ pub extern "C" fn verify(
     public_path: *const c_char,
     vk_path: *const c_char,
 ) -> VerifierResult {
+    #[cfg(feature = "android")]
+    init_android_logger();
+
     unsafe {
         let proof_path = CStr::from_ptr(proof_path).to_str().unwrap();
         let proof_str = std::fs::read_to_string(proof_path).unwrap();

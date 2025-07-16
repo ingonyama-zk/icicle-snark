@@ -6,7 +6,7 @@ use crate::{
 };
 use icicle_bn254::curve::ScalarField;
 use icicle_core::{
-    msm::{MSMConfig, msm}, 
+    msm::MSMConfig, 
     traits::{FieldImpl, MontgomeryConvertible}, vec_ops::{mul_scalars, sub_scalars, VecOpsConfig}, ntt::{NTTConfig, release_domain}
 };
 use icicle_runtime::{
@@ -37,6 +37,8 @@ macro_rules! debug_println {
 macro_rules! debug_println {
     ($($arg:tt)*) => {};
 }
+#[cfg(feature = "android")]
+use log::debug;
 
 #[cfg(not(feature = "no-randomness"))]
 use icicle_bn254::curve::ScalarCfg;
@@ -125,12 +127,20 @@ fn construct_r1cs(witness: &[ScalarField], zkey: &ZKey, header: &Groth16ZKeyHead
         (res, c_values, m_values)
     };
     
+    #[cfg(feature = "android")]
+    let start = Instant::now();
     let (res, c_values, m_values) = calc_wire_vals();
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    debug!("calc_wire_vals took {:?}", duration);
 
     let nof_coef = header.domain_size;
     let zero_scalar = ScalarField::zero();
     let mut out_buff_b_a = vec![ScalarField::zero(); nof_coef * 2];
 
+    #[cfg(feature = "android")]
+    let start = Instant::now();
     for i in 0..res.len() {
         let c = c_values[i];
         let m = m_values[i];
@@ -143,6 +153,10 @@ fn construct_r1cs(witness: &[ScalarField], zkey: &ZKey, header: &Groth16ZKeyHead
             *value = *value + res[i];
         }
     }
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    debug!("finalize wire values {:?}", duration);
 
     let mut d_vec = DeviceVec::device_malloc_async(nof_coef * 3, &stream).unwrap();
 
@@ -170,7 +184,9 @@ fn compute_h(d_vec: &mut DeviceVec<ScalarField>, coset_gen: Option<ScalarField>,
     ntt_cfg.stream_handle = stream.handle;
     ntt_cfg.is_async = true;
     ntt_cfg.batch_size = 3;
-    icicle_ntt(d_vec, true, &ntt_cfg);
+    #[cfg(feature = "android")]
+    let start = Instant::now();
+    icicle_ntt(d_vec, true, &ntt_cfg, "compute_h");
 
     let d_vec_copy = unsafe {
         DeviceSlice::from_mut_slice(std::slice::from_raw_parts_mut(
@@ -216,14 +232,27 @@ fn compute_h(d_vec: &mut DeviceVec<ScalarField>, coset_gen: Option<ScalarField>,
     } else {
         panic!("[compute_h]: Neither coset_gen nor keys provided");
     }
-    icicle_ntt(d_vec, false, &ntt_cfg);
+    icicle_ntt(d_vec, false, &ntt_cfg, "compute_h");
 
     // L * R - O
     mul_scalars(&d_vec[0..nof_coef], &d_vec[nof_coef..nof_coef * 2], &mut d_vec_copy[0..nof_coef], &cfg).unwrap();
     let mut d_h = DeviceVec::device_malloc(nof_coef).unwrap();
     sub_scalars(&d_vec[0..nof_coef], &d_vec[2 * nof_coef..], &mut d_h, &cfg).unwrap();
+    #[cfg(feature = "android")]
+    let start_release_domain = Instant::now();
     let _ = release_domain::<ScalarField>();
     stream.synchronize().unwrap();
+
+    #[cfg(feature = "android")]
+    let duration = start_release_domain.elapsed();
+    #[cfg(feature = "android")]
+    debug!("release_domain took {:?}", duration);
+
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    debug!("compute_h took {:?}", duration);
+
     d_h
 }
 
@@ -266,7 +295,7 @@ fn compute_h_batched(
     ntt_cfg.columns_batch = false; // Process as separate NTTs, not matrix columns
     
     // Forward NTT (inverse = true)
-    icicle_ntt(&mut batched_d_vec, true, &ntt_cfg);
+    icicle_ntt(&mut batched_d_vec, true, &ntt_cfg, "compute_h_batched forward");
 
     let batched_d_vec_copy = unsafe {
         DeviceSlice::from_mut_slice(std::slice::from_raw_parts_mut(
@@ -313,7 +342,7 @@ fn compute_h_batched(
     }
     
     // Inverse NTT (inverse = false)
-    icicle_ntt(&mut batched_d_vec, false, &ntt_cfg);
+    icicle_ntt(&mut batched_d_vec, false, &ntt_cfg, "compute_h_batched inverse");
 
     // Process each batch element: L * R - O
     let mut d_h_results = Vec::with_capacity(batch_size);
@@ -681,10 +710,17 @@ pub fn prove(
     zkey: &ZKey,
     device_type: DeviceType,
 ) -> Result<(Value, Value), Box<dyn std::error::Error>> {
+    #[cfg(feature = "android")]
+    let total_start = Instant::now();
     
+    #[cfg(feature = "android")]
     let start = Instant::now();
     let (mut wtns_file, sections_wtns) = FileWrapper::read_bin_file(witness, "wtns", 2).unwrap();
     let wtns = wtns_file.read_wtns_header(&sections_wtns[..]).unwrap();
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    log::debug!("Reading witness file took {:?}", duration);
     
     let ZKeyHeader::Groth16(header) = &zkey.header;
     
@@ -699,12 +735,20 @@ pub fn prove(
         );
     }
     
+    #[cfg(feature = "android")]
+    let start = Instant::now();
     let buff_witness = wtns_file.read_section(&sections_wtns[..], 2).unwrap();
     let scalars = from_u8::<F>(buff_witness);
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    log::debug!("Processing witness data took {:?}", duration);
     
     set_device(device_type);
     icicle_initialize_domain(header.domain_size as u64);
 
+    #[cfg(feature = "android")]
+    let start = Instant::now();
     let (pi_a, pi_b1, pi_b, pi_c, pi_h) = match device_type {
         DeviceType::Cpu => {
             prove_cpu(scalars, zkey, header)
@@ -716,7 +760,13 @@ pub fn prove(
             prove_metal(scalars, zkey, header)
         }
     };
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    log::info!("Core proving computation took {:?}", duration);
 
+    #[cfg(feature = "android")]
+    let start = Instant::now();
     #[cfg(not(feature = "no-randomness"))]
     let (pi_a, pi_b, pi_c) = {
         let rs = ScalarCfg::generate_random(2);
@@ -739,7 +789,13 @@ pub fn prove(
 
         (pi_a, pi_b, pi_c)
     };
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    log::debug!("Proof finalization took {:?}", duration);
 
+    #[cfg(feature = "android")]
+    let start = Instant::now();
     let mut public_signals = Vec::with_capacity(header.n_public);
     let field_size = ScalarField::zero().to_bytes_le().len();
 
@@ -751,6 +807,11 @@ pub fn prove(
         public_signals.push(scalar_bytes.to_str_radix(10));
     }
 
+    #[cfg(feature = "android")]
+    let duration = start.elapsed();
+    #[cfg(feature = "android")]
+    log::debug!("Extracting public signals took {:?}", duration);
+
     let proof = Proof {
         pi_a: serialize_g1_affine(pi_a.into()),
         pi_b: serialize_g2_affine(pi_b.into()),
@@ -759,6 +820,12 @@ pub fn prove(
         curve: "bn128".to_string(),
     };
     debug_println!("proof took: {:?}", start.elapsed());
+
+    #[cfg(feature = "android")]
+    let total_duration = total_start.elapsed();
+    #[cfg(feature = "android")]
+    log::info!("Groth16 prove completed successfully in {:?}", total_duration);
+
     Ok((serde_json::json!(proof), serde_json::json!(public_signals)))
 }
 
